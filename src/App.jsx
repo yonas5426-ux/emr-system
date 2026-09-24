@@ -57,7 +57,11 @@ function App() {
   const [triageSection, setTriageSection] = useState("Adult Emergency Triage");
   const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [opdMenuOpen, setOpdMenuOpen] = useState(false);
+  const [adminReportMenuOpen, setAdminReportMenuOpen] = useState(false);
   const [opdSection, setOpdSection] = useState("General OPD");
+  const [opdGeneralModule, setOpdGeneralModule] = useState("General Medical");
+  const [opdMnchModule, setOpdMnchModule] = useState("Family Planning");
+  const [opdSelectedScope, setOpdSelectedScope] = useState(null);
   const [pharmacyMenuOpen, setPharmacyMenuOpen] = useState(false);
   const [pharmacySection, setPharmacySection] = useState("Pharmacy store");
   const [emergencySection, setEmergencySection] = useState("Adult Emergency");
@@ -150,7 +154,16 @@ function App() {
     setAppointmentContext(data);
     setPage("Billing");
   }
+function openLaboratory(data) {
+  setAppointmentContext(data);
+  setPage("Laboratory");
+}
 
+function openPharmacy(data) {
+  setAppointmentContext(data);
+  setDoctorContext(data);
+  setPage("Pharmacy");
+}
   function openTriage(data) {
     setAppointmentContext(data);
     setTriageContext(data);
@@ -299,35 +312,168 @@ function App() {
                     <strong>🏥 OPD Modules</strong>
                     <button type="button" style={styles.overlayCloseButton} onClick={() => setOpdMenuOpen(false)}>✕</button>
                   </div>
+
                   <div style={styles.overlayPrimaryList}>
                     {[
-                      ["General OPD", "🏥"], ["MNCH", "👩‍🍼"],
-                      ["TB & HIV Clinic", "🧬"], ["Specialty Clinic", "🩺"],
-                      ["Procedure OPD", "📝"], ["Procedure Room", "🛏️"],
-                      ["Ophthalmology Clinic", "👁️"], ["Refill Clinic", "💊"],
-                      ["Risk Assessment", "⚠️"], ["Board Clinic", "📋"],
-                      ["Private Clinic", "🏢"], ["Report", "📈"],
-                    ].map(([label, icon]) => (
-                      <button
-                        key={label}
-                        type="button"
-                        role="menuitem"
-                        style={opdSection === label && page === "OPD" ? styles.overlayPrimaryActive : styles.overlayPrimaryButton}
-                        onClick={() => {
-                          setOpdSection(label);
-                          setPage("OPD");
-                          setOpdMenuOpen(false);
-                        }}
-                      >
-                        <span>{icon} {label}</span>
-                        <span style={{ fontSize: 18 }}>›</span>
-                      </button>
-                    ))}
+                      ["General OPD", "🏥"],
+                      ["MNCH", "👩‍🍼"],
+                      ["TB & HIV Clinic", "🧬"],
+                      ["Specialty Clinic", "🩺"],
+                      ["Procedure OPD", "📝"],
+                      ["Procedure Room", "🛏️"],
+                      ["Ophthalmology Clinic", "👁️"],
+                      ["Refill Clinic", "💊"],
+                      ["Risk Assessment", "⚠️"],
+                      ["Board Clinic", "📋"],
+                      ["Private Clinic", "🏢"],
+                      ["Report", "📈"],
+                    ].map(([label, icon]) => {
+                      const isGeneral = label === "General OPD";
+                      const isMnch = label === "MNCH";
+
+                      return (
+                        <div key={label} style={{ position: "relative" }}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            style={
+                              opdSection === label && page === "OPD"
+                                ? styles.overlayPrimaryActive
+                                : styles.overlayPrimaryButton
+                            }
+                            onClick={() => {
+                              if (isGeneral) {
+                                setOpdSection("General OPD");
+                                setOpdMenuOpen(true);
+                              } else if (isMnch) {
+                                setOpdSection("MNCH");
+                                setOpdMenuOpen(true);
+                              } else {
+                                setOpdSection(label);
+                                setPage("OPD");
+                                setOpdMenuOpen(false);
+                              }
+                            }}
+                          >
+                            <span>{icon} {label}</span>
+                            <span style={{ fontSize: 18 }}>{(isGeneral || isMnch) ? "›" : ""}</span>
+                          </button>
+
+                          {isGeneral && opdSection === "General OPD" && (
+                            <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 330, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 7000 }}>
+                              <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>🏥 General OPD Modules</div>
+                              {[
+                                ["General Medical", "🩺"], ["Surgical", "🔪"],
+                                ["Pediatrics", "👶"], ["Gynecology", "🤰"],
+                                ["MRC", "🩹"], ["SRC", "🏥"],
+                                ["PRC", "💊"], ["GRC", "🧬"],
+                                ["Staff Clinic", "👨‍⚕️"], ["HPN & DM Clinic", "❤️"],
+                                ["Report", "📊"],
+                              ].map(([item, itemIcon]) => (
+                                <div key={item} style={{ position: "relative" }}>
+                                  <button
+                                    type="button"
+                                    style={styles.overlayPrimaryButton}
+                                    onClick={() => {
+                                      setOpdGeneralModule(item);
+                                      setOpdSelectedScope(null);
+                                      if (item === "Report") {
+                                        setOpdSection("General OPD");
+                                        setPage("OPD");
+                                        setOpdMenuOpen(false);
+                                      }
+                                    }}
+                                  >
+                                    <span>{itemIcon} {item}</span>
+                                    <span style={{ fontSize: 18 }}>{item === "Report" ? "" : "›"}</span>
+                                  </button>
+
+                                  {item !== "Report" && opdGeneralModule === item && (
+                                    <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 230, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 8000 }}>
+                                      <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>👨‍⚕️ Professional Scope</div>
+                                      {["Senior", "R4", "R3", "R2", "R1", "HO", "GP", "INTERN", "Midwife/Nurse"].map((scope) => (
+                                        <button
+                                          key={scope}
+                                          type="button"
+                                          style={opdSelectedScope === scope ? styles.overlayPrimaryActive : styles.overlayPrimaryButton}
+                                          onClick={() => {
+                                            setOpdSelectedScope(scope);
+                                            setOpdSection("General OPD");
+                                            setPage("OPD");
+                                            setOpdMenuOpen(false);
+                                          }}
+                                        >
+                                          {scope}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {isMnch && opdSection === "MNCH" && (
+                            <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 330, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 7000 }}>
+                              <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>🤰 MNCH Modules</div>
+                              {[
+                                ["Family Planning", "👨‍👩‍👧‍👦"], ["ANC Clinic", "🤰"],
+                                ["PNC Clinic", "👩‍🍼"], ["Cervical Ca Screening", "🔬"],
+                                ["PMTCT Clinic", "🧑‍⚕️"], ["Neonatal Clinic", "👶"],
+                                ["CAC Clinic", "🏥"], ["Nutrition Clinic", "🥗"],
+                                ["Immunization Clinic", "💉"], ["Report", "📊"],
+                              ].map(([item, itemIcon]) => (
+                                <div key={item} style={{ position: "relative" }}>
+                                  <button
+                                    type="button"
+                                    style={styles.overlayPrimaryButton}
+                                    onClick={() => {
+                                      setOpdMnchModule(item);
+                                      setOpdSelectedScope(null);
+                                      if (item === "Report") {
+                                        setOpdSection("MNCH");
+                                        setPage("OPD");
+                                        setOpdMenuOpen(false);
+                                      }
+                                    }}
+                                  >
+                                    <span>{itemIcon} {item}</span>
+                                    <span style={{ fontSize: 18 }}>{item === "Report" ? "" : "›"}</span>
+                                  </button>
+
+                                  {item !== "Report" && opdMnchModule === item && (
+                                    <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 230, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 8000 }}>
+                                      <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>👩‍⚕️ Professional Scope</div>
+                                      {["Senior", "R4", "R3", "R2", "R1", "HO", "GP", "INTERN", "Midwife/Nurse"].map((scope) => (
+                                        <button
+                                          key={scope}
+                                          type="button"
+                                          style={opdSelectedScope === scope ? styles.overlayPrimaryActive : styles.overlayPrimaryButton}
+                                          onClick={() => {
+                                            setOpdSelectedScope(scope);
+                                            setOpdSection("MNCH");
+                                            setPage("OPD");
+                                            setOpdMenuOpen(false);
+                                          }}
+                                        >
+                                          {scope}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </>
             )}
           </div>
+
           <div style={styles.navDropdown} data-triage-dropdown>
             <button
               type="button"
@@ -710,7 +856,64 @@ function App() {
               </>
             )}
           </div>
-          <TopNavButton page={page} setPage={setPage} name="All admin & Report" icon="📊" />
+          <div style={styles.navDropdown} data-admin-report-dropdown>
+            <button
+              type="button"
+              style={page === "All admin & Report" || adminReportMenuOpen ? styles.activeTopNavSummary : styles.topNavSummary}
+              onClick={() => {
+                setAdminReportMenuOpen((open) => !open);
+                setOpdMenuOpen(false);
+                setEmergencyMenuOpen(false);
+                setTriageRegMenuOpen(false);
+                setTriageRegSubmenu(null);
+              }}
+            >
+              📊 All admin & Report <span style={{ fontSize: 18 }}>{adminReportMenuOpen ? "▴" : "▾"}</span>
+            </button>
+
+            {adminReportMenuOpen && (
+              <>
+                <div style={styles.overlayBackdrop} aria-hidden="true" />
+                <div style={styles.overlayDropdown} role="menu">
+                  <div style={styles.overlayDropdownTitle}>
+                    <strong>📊 All admin & Report</strong>
+                    <button type="button" style={styles.overlayCloseButton} onClick={() => setAdminReportMenuOpen(false)}>✕</button>
+                  </div>
+
+                  {[
+                    ["Administration", "⚙️"],
+                    ["Download", "⬇️"],
+                    ["Casher report", "💰"],
+                    ["HMIS Register", "📋"],
+                    ["Disease Register", "🦠"],
+                    ["Procuder Report", "📑"],
+                    ["KPI Report", "📊"],
+                    ["Client data Management", "👤"],
+                    ["Drug Audit", "💊"],
+                    ["Admin Register", "🗂️"],
+                    ["HMIS Report", "📈"],
+                    ["KPI Register", "📊"],
+                    ["EHSTG", "🏥"],
+                    ["HSTQ", "🏥"],
+                    ["Setting", "⚙️"],
+                  ].map(([label, icon]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      role="menuitem"
+                      style={page === label ? styles.overlayPrimaryActive : styles.overlayPrimaryButton}
+                      onClick={() => {
+                        setPage(label);
+                        setAdminReportMenuOpen(false);
+                      }}
+                    >
+                      <span>{icon} {label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </nav>
       </aside>
 
@@ -749,7 +952,7 @@ function App() {
 
         {page === "Patients" && <Patients />}
 
-        {page === "OPD" && <OPD initialSection={opdSection} onMessage={(message) => alert(message)} />}
+        {page === "OPD" && <OPD initialSection={opdSection} selectedGeneralModule={opdGeneralModule} selectedMnchModule={opdMnchModule} selectedScope={opdSelectedScope} onMessage={(message) => alert(message)} />}
 
         {page === "Appointments" && (
           <Appointments
