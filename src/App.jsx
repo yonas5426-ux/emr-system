@@ -58,10 +58,13 @@ function App() {
   const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [opdMenuOpen, setOpdMenuOpen] = useState(false);
   const [adminReportMenuOpen, setAdminReportMenuOpen] = useState(false);
-  const [opdSection, setOpdSection] = useState("General OPD");
-  const [opdGeneralModule, setOpdGeneralModule] = useState("General Medical");
+  const [opdSection, setOpdSection] = useState("");
+  const [opdGeneralModule, setOpdGeneralModule] = useState("");
   const [opdMnchModule, setOpdMnchModule] = useState("Family Planning");
   const [opdSelectedScope, setOpdSelectedScope] = useState(null);
+  const [opdSpecialtyClinic, setOpdSpecialtyClinic] = useState(null);
+  const [opdSpecialtyScope, setOpdSpecialtyScope] = useState(null);
+  const [opdSpecialtyLevel, setOpdSpecialtyLevel] = useState(null);
   const [pharmacyMenuOpen, setPharmacyMenuOpen] = useState(false);
   const [pharmacySection, setPharmacySection] = useState("Pharmacy store");
   const [emergencySection, setEmergencySection] = useState("Adult Emergency");
@@ -150,7 +153,8 @@ function App() {
     setPage("Medical Record");
   }
 
-  function openBilling(data) {
+  function openBilling(data, section = billingSection) {
+    setBillingSection(section);
     setAppointmentContext(data);
     setPage("Billing");
   }
@@ -170,6 +174,14 @@ function openPharmacy(data) {
     setTriageRegistrationMode("Triage");
     setTriageRegistrationTriageType(data?.triage_type || "");
     setPage("Registration");
+  }
+
+  function openOPD(data, section = "General OPD", generalModule = "General Medical", scope = "GP") {
+    setAppointmentContext(data);
+    setOpdSection(section);
+    setOpdGeneralModule(generalModule);
+    setOpdSelectedScope(scope);
+    setPage("OPD");
   }
 
   function openDoctor(data) {
@@ -330,6 +342,8 @@ function openPharmacy(data) {
                     ].map(([label, icon]) => {
                       const isGeneral = label === "General OPD";
                       const isMnch = label === "MNCH";
+                      const isTbHiv = label === "TB & HIV Clinic";
+                      const isSpecialty = label === "Specialty Clinic";
 
                       return (
                         <div key={label} style={{ position: "relative" }}>
@@ -348,6 +362,15 @@ function openPharmacy(data) {
                               } else if (isMnch) {
                                 setOpdSection("MNCH");
                                 setOpdMenuOpen(true);
+                              } else if (isTbHiv) {
+                                setOpdSection("TB & HIV Clinic");
+                                setOpdMenuOpen(true);
+                              } else if (isSpecialty) {
+                                setOpdSection("Specialty Clinic");
+                                setOpdMenuOpen(true);
+                                setOpdSpecialtyClinic(null);
+                                setOpdSpecialtyScope(null);
+                                setOpdSpecialtyLevel(null);
                               } else {
                                 setOpdSection(label);
                                 setPage("OPD");
@@ -356,8 +379,190 @@ function openPharmacy(data) {
                             }}
                           >
                             <span>{icon} {label}</span>
-                            <span style={{ fontSize: 18 }}>{(isGeneral || isMnch) ? "›" : ""}</span>
+                            <span style={{ fontSize: 18 }}>{(isGeneral || isMnch || isTbHiv || isSpecialty) ? "›" : ""}</span>
                           </button>
+
+
+
+                          {isSpecialty && opdSection === "Specialty Clinic" && (
+                            <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 340, maxHeight: 650, overflowY: "auto", background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 7000 }}>
+                              <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>
+                                🩺 Specialty Clinics
+                              </div>
+
+                              {[
+                                "Orthopedics",
+                                "Dermatology",
+                                "Maxillo Facial",
+                                "Dental",
+                                "ENT",
+                                "Neurology",
+                                "Neuro-Surgery",
+                                "Urology",
+                                "Plastic & Burn",
+                                "Nephrology",
+                                "Dental Orthodontics",
+                                "Pediatrics Surgery OPD",
+                                "Infertility Clinic",
+                                "Cardiology",
+                                "Endocrine",
+                                "Gastroenterology",
+                                "Hematology",
+                                "Hepato-Biliary Surgery",
+                                "Thoracic Surgery",
+                                "Pain & Palliative Care",
+                                "Psychiatry OPD",
+                                "Oncology",
+                                "Pre Anesthesia"
+                              ].map((clinic) => (
+                                <div key={clinic} style={{ position: "relative" }}>
+                                  <button
+                                    type="button"
+                                    style={
+                                      opdSpecialtyClinic === clinic
+                                        ? styles.overlayPrimaryActive
+                                        : styles.overlayPrimaryButton
+                                    }
+                                    onClick={() => {
+                                      setOpdSpecialtyClinic(clinic);
+                                      setOpdSpecialtyScope(null);
+                                      setOpdSpecialtyLevel(null);
+                                    }}
+                                  >
+                                    <span>🩺 {clinic}</span>
+                                    <span style={{ fontSize: 18 }}>›</span>
+                                  </button>
+
+                                  {opdSpecialtyClinic === clinic && clinic !== "Pre Anesthesia" && (
+                                    <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 250, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 8000 }}>
+                                      <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>
+                                        👨‍⚕️ Professional Scope
+                                      </div>
+
+                                      {[
+                                        "Senior",
+                                        "R4",
+                                        "R3",
+                                        "R2",
+                                        "R1",
+                                        "HO",
+                                        "GP",
+                                        "INTERN",
+                                        "Midwife/Nurse"
+                                      ].map((scope) => (
+                                        <div key={scope} style={{ position: "relative" }}>
+                                          <button
+                                            type="button"
+                                            style={
+                                              opdSpecialtyScope === scope
+                                                ? styles.overlayPrimaryActive
+                                                : styles.overlayPrimaryButton
+                                            }
+                                            onClick={() => {
+                                              setOpdSpecialtyScope(scope);
+                                              setOpdSpecialtyLevel(null);
+                                            }}
+                                          >
+                                            <span>{scope}</span>
+                                            <span style={{ fontSize: 18 }}>›</span>
+                                          </button>
+
+                                          {opdSpecialtyScope === scope && (
+                                            <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 250, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 9000 }}>
+                                              <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>
+                                                📋 4th Level
+                                              </div>
+
+                                              {[
+                                                "Clinic Patient",
+                                                "Consultation List",
+                                                "Feedback List"
+                                              ].map((level) => (
+                                                <button
+                                                  key={level}
+                                                  type="button"
+                                                  style={
+                                                    opdSpecialtyLevel === level
+                                                      ? styles.overlayPrimaryActive
+                                                      : styles.overlayPrimaryButton
+                                                  }
+                                                  onClick={() => {
+                                                    setOpdSpecialtyLevel(level);
+                                                    setOpdSection("Specialty Clinic");
+                                                    setPage("OPD");
+                                                    setOpdMenuOpen(false);
+                                                  }}
+                                                >
+                                                  {level}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {opdSpecialtyClinic === clinic && clinic === "Pre Anesthesia" && (
+                                    <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 250, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 8000 }}>
+                                      <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>
+                                        📝 Pre Anesthesia
+                                      </div>
+
+                                      {[
+                                        "Preanesthesia List",
+                                        "Consultation List",
+                                        "Feedback List"
+                                      ].map((item) => (
+                                        <button
+                                          key={item}
+                                          type="button"
+                                          style={styles.overlayPrimaryButton}
+                                          onClick={() => {
+                                            setOpdSpecialtyLevel(item);
+                                            setOpdSection("Specialty Clinic");
+                                            setPage("OPD");
+                                            setOpdMenuOpen(false);
+                                          }}
+                                        >
+                                          {item}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {isTbHiv && opdSection === "TB & HIV Clinic" && (
+                            <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 330, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 7000 }}>
+                              <div style={{ fontWeight: 700, padding: "10px 12px", borderBottom: "1px solid #ddd" }}>
+                                🧬 TB & HIV Clinic
+                              </div>
+
+                              {[
+                                ["VCT Entry", "📝"],
+                                ["VCT List", "👥"],
+                                ["VCT Report", "📊"],
+                              ].map(([item, itemIcon]) => (
+                                <button
+                                  key={item}
+                                  type="button"
+                                  style={styles.overlayPrimaryButton}
+                                  onClick={() => {
+                                    setOpdSection("TB & HIV Clinic");
+                                    setOpdGeneralModule(item);
+                                    setOpdSelectedScope(null);
+                                    setPage("OPD");
+                                    setOpdMenuOpen(false);
+                                  }}
+                                >
+                                  <span>{itemIcon} {item}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
 
                           {isGeneral && opdSection === "General OPD" && (
                             <div style={{ position: "absolute", left: "calc(100% + 8px)", top: 0, width: 330, background: "#fff", border: "2px solid #333", borderRadius: 10, boxShadow: "0 14px 35px rgba(0,0,0,.25)", padding: 8, zIndex: 7000 }}>
@@ -945,6 +1150,7 @@ function openPharmacy(data) {
         {page === "Registration" && (
           <TriageRegistration
             user={session.user}
+            billingSection={billingSection}
             initialMode={triageRegistrationMode}
             initialTriageType={triageRegistrationTriageType}
           />
@@ -952,7 +1158,7 @@ function openPharmacy(data) {
 
         {page === "Patients" && <Patients />}
 
-        {page === "OPD" && <OPD initialSection={opdSection} selectedGeneralModule={opdGeneralModule} selectedMnchModule={opdMnchModule} selectedScope={opdSelectedScope} onMessage={(message) => alert(message)} />}
+        {page === "OPD" && <OPD goBilling={openBilling} initialSection={opdSection} selectedGeneralModule={opdGeneralModule} selectedMnchModule={opdMnchModule} selectedScope={opdSelectedScope} onMessage={(message) => alert(message)} />}
 
         {page === "Appointments" && (
           <Appointments
@@ -966,9 +1172,12 @@ function openPharmacy(data) {
           <Triage
             appointment={triageContext}
             user={session.user}
+            billingSection={billingSection}
+            goBilling={openBilling}
             goBack={() => setPage("Appointments")}
             goMedicalRecord={openMedicalRecord}
             goDoctor={openDoctor}
+            goOPD={openOPD}
           />
         )}
 
@@ -976,6 +1185,7 @@ function openPharmacy(data) {
           <DoctorConsultation
             appointment={doctorContext}
             user={session.user}
+            billingSection={billingSection}
             goBack={() => setPage("Triage")}
             goMedicalRecord={openMedicalRecord}
             goBilling={openBilling}
@@ -986,6 +1196,7 @@ function openPharmacy(data) {
           <MedicalRecord
             appointment={medicalRecordPatient}
             user={session.user}
+            billingSection={billingSection}
             goBack={() => setPage("Appointments")}
             goBilling={openBilling}
           />
@@ -995,6 +1206,7 @@ function openPharmacy(data) {
           <Pharmacy
             appointment={doctorContext || appointmentContext}
             user={session.user}
+            billingSection={billingSection}
             goBack={() => setPage("Doctor Consultation")}
           />
         )}
@@ -1003,17 +1215,20 @@ function openPharmacy(data) {
           <Emergency
             initialUnit={emergencySection}
             user={session.user}
+            billingSection={billingSection}
           />
         )}
 
         {page === "OR" && (
-          <OR section={orSection} subsection={orSubsection} user={session.user} />
+          <OR section={orSection} subsection={orSubsection} user={session.user}
+            billingSection={billingSection} />
         )}
 
         {["Diagnostics", "Inpatient", "Liaison", "QI & Report"].includes(page) && (
           <HospitalModule
             module={page}
             user={session.user}
+            billingSection={billingSection}
             submodule={page === "Inpatient" ? inpatientSection : page === "Liaison" ? liaisonSection : page === "Diagnostics" ? diagnosticsSection : undefined}
           />
         )}
@@ -1022,6 +1237,7 @@ function openPharmacy(data) {
           <Billing
             appointment={appointmentContext}
             user={session.user}
+            billingSection={billingSection}
             goBack={() => setPage("Appointments")}
           />
         )}
@@ -1251,6 +1467,7 @@ function Appointments({ goPatientRecord, goBilling, goTriage }) {
   const [appointments, setAppointments] = useState([]);
   const [patients, setPatients] = useState([]);
   const [showForm, setShowForm] = useState(false);
+  const [triageCategory, setTriageCategory] = useState("Active Today");
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null);
   const [search, setSearch] = useState("");
@@ -1300,6 +1517,135 @@ function Appointments({ goPatientRecord, goBilling, goTriage }) {
       [e.target.name]: e.target.value,
     });
   }
+
+  async function loadPharmacyBilling() {
+    if (!appointment?.patient_number) return;
+
+    const { data: prescriptionData, error: prescriptionError } =
+      await supabase
+        .from("prescriptions")
+        .select("*")
+        .eq("patient_number", appointment.patient_number)
+        .order("id", { ascending: false });
+
+    if (prescriptionError) {
+      alert("Unable to load prescriptions: " + prescriptionError.message);
+      return;
+    }
+
+    const { data: priceData, error: priceError } =
+      await supabase
+        .from("service_prices")
+        .select("id, service_name, price")
+        .eq("service_type", "Pharmacy")
+        .eq("active", true);
+
+    if (priceError) {
+      alert("Unable to load pharmacy prices: " + priceError.message);
+      return;
+    }
+
+    const prices = priceData || [];
+
+    const pharmacyBills = (transactions || []).filter(
+      (item) =>
+        item.service_type === "Pharmacy" &&
+        item.patient_number === appointment.patient_number
+    );
+
+    const rows = (prescriptionData || []).map((prescription) => {
+      const price = prices.find(
+        (p) =>
+          String(p.service_name || "").trim().toLowerCase() ===
+          String(prescription.medication_name || "").trim().toLowerCase()
+      );
+
+      const bill = pharmacyBills.find(
+        (item) => Number(item.service_id) === Number(prescription.id)
+      );
+
+      return {
+        ...prescription,
+        pharmacy_price: price ? Number(price.price) : null,
+        price_id: price ? price.id : null,
+        bill: bill || null,
+      };
+    });
+
+    setPharmacyPrescriptions(rows);
+  }
+
+  async function createPharmacyBill(item) {
+    if (!appointment?.patient_number) {
+      alert("No patient selected.");
+      return;
+    }
+
+    if (item.bill) {
+      alert("A pharmacy bill already exists for this prescription.");
+      return;
+    }
+
+    if (item.pharmacy_price === null) {
+      alert(
+        "No active pharmacy price was found for " +
+        item.medication_name +
+        ". Please add the medication to General Price Setting first."
+      );
+      return;
+    }
+
+    const data = {
+      patient_number: appointment.patient_number,
+
+      appointment_id: appointment.id
+        ? Number(appointment.id)
+        : null,
+
+      consultation_id: appointment.consultation_id
+        ? Number(appointment.consultation_id)
+        : null,
+
+      transaction_date: new Date()
+        .toISOString()
+        .slice(0, 10),
+
+      description: item.medication_name,
+
+      quantity: 1,
+
+      unit_price: item.pharmacy_price,
+
+      total_amount: item.pharmacy_price,
+
+      payment_method: null,
+
+      payment_status: "Unpaid",
+
+      notes: "Pharmacy bill for prescription #" + item.id,
+
+      created_by: user.id,
+
+      service_type: "Pharmacy",
+
+      service_id: item.id,
+    };
+
+    const { error } = await supabase
+      .from("billing_transactions")
+      .insert([data]);
+
+    if (error) {
+      alert("Unable to create pharmacy bill: " + error.message);
+      return;
+    }
+
+    await loadTransactions();
+    await loadPharmacyBilling();
+
+    alert("Pharmacy bill created successfully. Payment is required before dispensing.");
+  }
+
 
   function newAppointment() {
     setEditing(null);
@@ -1441,6 +1787,83 @@ function Appointments({ goPatientRecord, goBilling, goTriage }) {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {billingSection === "Pharmacy Bill" && (
+        <div style={styles.formBox}>
+          <h3>💊 Pharmacy Bills</h3>
+
+          {!appointment?.patient_number && (
+            <p>Please select a patient first.</p>
+          )}
+
+          {appointment?.patient_number &&
+            pharmacyPrescriptions.length === 0 && (
+              <p>No prescriptions found for this patient.</p>
+            )}
+
+          {pharmacyPrescriptions.length > 0 && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>Medication</th>
+                  <th style={styles.th}>Dosage</th>
+                  <th style={styles.th}>Frequency</th>
+                  <th style={styles.th}>Price</th>
+                  <th style={styles.th}>Bill</th>
+                  <th style={styles.th}>Payment</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {pharmacyPrescriptions.map((item) => (
+                  <tr key={item.id}>
+                    <td style={styles.td}>
+                      {item.medication_name}
+                    </td>
+
+                    <td style={styles.td}>
+                      {item.dosage || "-"}
+                    </td>
+
+                    <td style={styles.td}>
+                      {item.frequency || "-"}
+                    </td>
+
+                    <td style={styles.td}>
+                      {item.pharmacy_price !== null
+                        ? item.pharmacy_price.toFixed(2)
+                        : "No price"}
+                    </td>
+
+                    <td style={styles.td}>
+                      {item.bill ? (
+                        "Created"
+                      ) : (
+                        <button
+                          style={styles.paymentButtonSmall}
+                          onClick={() => createPharmacyBill(item)}
+                        >
+                          🧾 Create Bill
+                        </button>
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      {item.bill
+                        ? item.bill.payment_status
+                        : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <p style={{ marginTop: "15px" }}>
+            ⚠️ Dispensing is allowed only after the pharmacy bill is marked Paid.
+          </p>
+        </div>
+      )}
 
       {showForm && (
         <div style={styles.formBox}>
@@ -1734,13 +2157,25 @@ function Triage({
   appointment,
   user,
   goBack,
+  billingSection,
   goMedicalRecord,
   goDoctor,
+  goOPD,
+  goBilling,
 }) {
   const [records, setRecords] = useState([]);
+  const [triagePatients, setTriagePatients] = useState([]);
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [triageCategory, setTriageCategory] = useState("Active Today");
+  const [managedPatient, setManagedPatient] = useState(null);
+  const [manageTab, setManageTab] = useState("Patient View");
+
+  const [triageDestination, setTriageDestination] = useState("");
+  const [triageOpdModule, setTriageOpdModule] = useState("");
+  const [triageOpdDepartment, setTriageOpdDepartment] = useState("");
+  const [triageProfessionalScope, setTriageProfessionalScope] = useState("");
 
   const [form, setForm] = useState({
     patient_number: appointment?.patient_number || "",
@@ -1781,7 +2216,53 @@ function Triage({
       .select("*")
       .order("id", { ascending: false });
 
+    const { data: patientData } = await supabase
+      .from("patients")
+      .select("*")
+      .order("patient_number", { ascending: true });
+
     setRecords(data || []);
+    setTriagePatients(patientData || []);
+  }
+
+  function getTriagePatient(patientNumber) {
+    return triagePatients.find(
+      (patient) =>
+        String(patient.patient_number).trim() ===
+        String(patientNumber).trim()
+    );
+  }
+
+  function getTriagePatientName(patientNumber) {
+    const patient = getTriagePatient(patientNumber);
+
+    return patient
+      ? [
+          patient.first_name,
+          patient.father_name,
+          patient.grandfather_name,
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : "-";
+  }
+
+  function getTriagePatientAge(patient) {
+    if (!patient?.birth_year) return "-";
+
+    const birthYear = Number(patient.birth_year);
+    if (!Number.isFinite(birthYear)) return "-";
+
+    const currentYear =
+      patient.birth_date_type === "Ethiopian"
+        ? new Intl.DateTimeFormat("en-US-u-ca-ethiopic", {
+            year: "numeric",
+          }).format(new Date())
+        : new Date().getFullYear();
+
+    const age = Number(currentYear) - birthYear;
+
+    return age >= 0 ? age : "-";
   }
 
   function handleChange(e) {
@@ -1818,6 +2299,21 @@ function Triage({
         form.pain_score === ""
           ? null
           : Number(form.pain_score),
+      service_type:
+        billingSection === "Registration Fee" ? "Registration" :
+        billingSection === "Appointment Fee" ? "Appointment" :
+        billingSection === "Emergency Service Bill" ? "Emergency" :
+        billingSection === "Outpatient Service Bill" ? "Outpatient" :
+        billingSection === "Inpatient Service Bill" ? "Inpatient" :
+        billingSection === "OBS Service Bill" ? "OBS" :
+        billingSection === "Pharmacy Bill" ? "Pharmacy" :
+        null,
+
+      service_id:
+        appointment.service_id
+          ? Number(appointment.service_id)
+          : null,
+
       created_by: user.id,
     };
 
@@ -1834,7 +2330,78 @@ function Triage({
     await loadRecords();
   }
 
-  const filtered = records.filter((record) => {
+  function localDateString(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + d;
+  }
+
+  function isPendingOver24Hours(record) {
+    if (record.disposition) return false;
+
+    if (!record.triage_date) return false;
+
+    const timePart = record.arrival_time || "00:00";
+    const arrival = new Date(
+      record.triage_date + "T" + timePart
+    );
+
+    if (Number.isNaN(arrival.getTime())) return false;
+
+    return (
+      Date.now() - arrival.getTime() >
+      24 * 60 * 60 * 1000
+    );
+  }
+
+  function isSentForExamination(record) {
+    const disposition = String(
+      record.disposition || ""
+    ).trim().toLowerCase();
+
+    return (
+      disposition === "doctor review" ||
+      disposition === "sent for examination" ||
+      disposition === "examination"
+    );
+  }
+
+  function isDisposed(record) {
+    return Boolean(
+      String(record.disposition || "").trim()
+    );
+  }
+
+  function categoryMatches(record) {
+    const today = localDateString();
+
+    if (triageCategory === "Active Today") {
+      return (
+        record.triage_date === today &&
+        !record.disposition
+      );
+    }
+
+    if (triageCategory === "Pending >24 Hours") {
+      return isPendingOver24Hours(record);
+    }
+
+    if (triageCategory === "Sent for Examination") {
+      return isSentForExamination(record);
+    }
+
+    if (triageCategory === "All Sent / Disposed") {
+      return isDisposed(record);
+    }
+
+    return true;
+  }
+
+  const categoryRecords =
+    records.filter(categoryMatches);
+
+  const filtered = categoryRecords.filter((record) => {
     const text = search.toLowerCase().trim();
 
     return (
@@ -1846,6 +2413,20 @@ function Triage({
       (record.chief_complaint || "").toLowerCase().includes(text)
     );
   });
+
+  const activeTodayCount = records.filter((record) =>
+    record.triage_date === localDateString() &&
+    !record.disposition
+  ).length;
+
+  const pending24Count =
+    records.filter(isPendingOver24Hours).length;
+
+  const sentExamCount =
+    records.filter(isSentForExamination).length;
+
+  const allSentCount =
+    records.filter(isDisposed).length;
 
   return (
     <div style={styles.panel}>
@@ -1885,6 +2466,73 @@ function Triage({
           </div>
         </div>
       )}
+
+      <div style={{ marginTop: "20px", marginBottom: "15px" }}>
+        <div style={styles.row}>
+          <h3 style={{ margin: 0 }}>Triage Queue</h3>
+          <span>{filtered.length} shown</span>
+        </div>
+
+        <div style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "10px",
+          marginTop: "12px",
+        }}>
+          <button
+            style={
+              triageCategory === "Active Today"
+                ? styles.triageButton
+                : styles.cancelButton
+            }
+            onClick={() =>
+              setTriageCategory("Active Today")
+            }
+          >
+            🟢 Active Today ({activeTodayCount})
+          </button>
+
+          <button
+            style={
+              triageCategory === "Pending >24 Hours"
+                ? styles.triageButton
+                : styles.cancelButton
+            }
+            onClick={() =>
+              setTriageCategory("Pending >24 Hours")
+            }
+          >
+            🟠 Pending &gt;24 Hours ({pending24Count})
+          </button>
+
+          <button
+            style={
+              triageCategory === "Sent for Examination"
+                ? styles.triageButton
+                : styles.cancelButton
+            }
+            onClick={() =>
+              setTriageCategory("Sent for Examination")
+            }
+          >
+            🔵 Sent for Examination ({sentExamCount})
+          </button>
+
+          <button
+            style={
+              triageCategory === "All Sent / Disposed"
+                ? styles.triageButton
+                : styles.cancelButton
+            }
+            onClick={() =>
+              setTriageCategory("All Sent / Disposed")
+            }
+          >
+            ⚫ All Sent / Disposed ({allSentCount})
+          </button>
+        </div>
+      </div>
+
 
       <div style={styles.searchBox}>
         🔍
@@ -2078,6 +2726,775 @@ function Triage({
         </div>
       )}
 
+      {managedPatient && (
+        <div style={styles.detailsBox}>
+          <div style={styles.row}>
+            <div>
+              <h3>⚙️ Manage Active Patient</h3>
+              <p>
+                Patient: <strong>{managedPatient.patient_number}</strong>
+              </p>
+            </div>
+
+            <button
+              style={styles.cancelButton}
+              onClick={() => setManagedPatient(null)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "10px",
+            marginBottom: "20px",
+          }}>
+            <button
+              style={
+                manageTab === "Patient View"
+                  ? styles.triageButton
+                  : styles.cancelButton
+              }
+              onClick={() => setManageTab("Patient View")}
+            >
+              👁️ Patient View
+            </button>
+
+            <button
+              style={
+                manageTab === "Score Form"
+                  ? styles.triageButton
+                  : styles.cancelButton
+              }
+              onClick={() => setManageTab("Score Form")}
+            >
+              📋 Score Form
+            </button>
+
+            <button
+              style={
+                manageTab === "Add Note"
+                  ? styles.triageButton
+                  : styles.cancelButton
+              }
+              onClick={() => setManageTab("Add Note")}
+            >
+              📝 Add Note
+            </button>
+          </div>
+
+          {manageTab === "Patient View" && (
+            <div style={styles.formBox}>
+              <h3>👁️ Patient View</h3>
+
+              <div style={styles.detailsGrid}>
+                <Detail
+                  label="Patient Number"
+                  value={managedPatient.patient_number}
+                />
+                <Detail
+                  label="Triage Date"
+                  value={managedPatient.triage_date}
+                />
+                <Detail
+                  label="Arrival Time"
+                  value={managedPatient.arrival_time}
+                />
+                <Detail
+                  label="Chief Complaint"
+                  value={managedPatient.chief_complaint}
+                />
+                <Detail
+                  label="Acuity"
+                  value={managedPatient.acuity}
+                />
+                <Detail
+                  label="Scope"
+                  value={managedPatient.scope}
+                />
+              </div>
+
+              <div style={{
+                marginTop: "20px",
+                padding: "15px",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+              }}>
+                <h4>Is The Patient Wrongly Assigned?</h4>
+
+                <select
+                  style={{ width: "100%", padding: "10px" }}
+                  defaultValue=""
+                >
+                  <option value="">
+                    Select another triage unit
+                  </option>
+                  <option value="Adult Emergency Triage">
+                    🚑 Adult Emergency Triage
+                  </option>
+                  <option value="Central Triage">
+                    🩺 Central Triage
+                  </option>
+                  <option value="Pedi Triage">
+                    👶 Pedi Triage
+                  </option>
+                  <option value="Gyn Triage">
+                    👩 Gyn Triage
+                  </option>
+                  <option value="Obs Triage">
+                    🤰 Obs Triage
+                  </option>
+                  <option value="Neonatal Triage">
+                    🍼 Neonatal Triage
+                  </option>
+                </select>
+
+                <button
+                  style={{
+                    ...styles.triageButton,
+                    marginTop: "10px",
+                  }}
+                  onClick={async () => {
+                    const select =
+                      document.getElementById(
+                        "triage-reassign-unit"
+                      );
+
+                    const selectedUnit = select?.value || "";
+
+                    if (!selectedUnit) {
+                      alert("Please select the new triage unit first.");
+                      return;
+                    }
+
+                    const { data: existing, error: findError } =
+                      await supabase
+                        .from("triage_management")
+                        .select("id")
+                        .eq("triage_id", managedPatient.id)
+                        .maybeSingle();
+
+                    if (findError) {
+                      alert(findError.message);
+                      return;
+                    }
+
+                    let error;
+
+                    if (existing) {
+                      ({ error } = await supabase
+                        .from("triage_management")
+                        .update({
+                          wrongly_assigned: true,
+                          assigned_triage_unit: selectedUnit,
+                          updated_at: new Date().toISOString(),
+                        })
+                        .eq("id", existing.id));
+                    } else {
+                      ({ error } = await supabase
+                        .from("triage_management")
+                        .insert([{
+                          triage_id: managedPatient.id,
+                          wrongly_assigned: true,
+                          assigned_triage_unit: selectedUnit,
+                          created_by: user.id,
+                        }]));
+                    }
+
+                    if (error) {
+                      alert(error.message);
+                      return;
+                    }
+
+                    alert(
+                      "Patient re-assigned to " +
+                      selectedUnit +
+                      " successfully."
+                    );
+                  }}
+                >
+                  🔄 Re-Assign
+                </button>
+              </div>
+            </div>
+          )}
+
+          {manageTab === "Score Form" && (
+            <div style={styles.formBox}>
+              <h3>📋 Triage Score Form</h3>
+
+              <div style={styles.detailsGrid}>
+                <Detail
+                  label="Patient"
+                  value={managedPatient.patient_number}
+                />
+                <Detail
+                  label="Acuity"
+                  value={managedPatient.acuity}
+                />
+                <Detail
+                  label="Pain Score"
+                  value={managedPatient.pain_score}
+                />
+                <Detail
+                  label="Consciousness"
+                  value={managedPatient.consciousness}
+                />
+              </div>
+
+              <div style={{
+                marginTop: "20px",
+                padding: "15px",
+                border: "1px solid #ddd",
+                borderRadius: "8px",
+              }}>
+                <h4>Clinical Triage Assessment</h4>
+
+                <div style={styles.formGrid}>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    placeholder="Pain Score (0-10)"
+                    defaultValue={managedPatient.pain_score ?? ""}
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        pain_score: e.target.value,
+                      })
+                    }
+                  />
+
+                  <select
+                    defaultValue={managedPatient.consciousness || ""}
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        consciousness: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">Consciousness</option>
+                    <option value="Alert">Alert</option>
+                    <option value="Verbal Response">
+                      Verbal Response
+                    </option>
+                    <option value="Pain Response">
+                      Pain Response
+                    </option>
+                    <option value="Unresponsive">
+                      Unresponsive
+                    </option>
+                  </select>
+
+                  <select
+                    defaultValue={managedPatient.acuity || ""}
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        acuity: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="">Acuity</option>
+                    <option value="Critical">Critical</option>
+                    <option value="Urgent">Urgent</option>
+                    <option value="Semi-Urgent">
+                      Semi-Urgent
+                    </option>
+                    <option value="Non-Urgent">
+                      Non-Urgent
+                    </option>
+                  </select>
+
+                  <input
+                    placeholder="Blood Pressure"
+                    defaultValue={
+                      managedPatient.blood_pressure || ""
+                    }
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        blood_pressure: e.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    type="number"
+                    placeholder="Pulse"
+                    defaultValue={managedPatient.pulse ?? ""}
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        pulse: e.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="Temperature °C"
+                    defaultValue={
+                      managedPatient.temperature ?? ""
+                    }
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        temperature: e.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    type="number"
+                    placeholder="Respiratory Rate"
+                    defaultValue={
+                      managedPatient.respiratory_rate ?? ""
+                    }
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        respiratory_rate: e.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Oxygen Saturation %"
+                    defaultValue={
+                      managedPatient.oxygen_saturation ?? ""
+                    }
+                    onChange={(e) =>
+                      setManagedPatient({
+                        ...managedPatient,
+                        oxygen_saturation: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <button
+                  style={{
+                    ...styles.triageButton,
+                    marginTop: "15px",
+                  }}
+                  onClick={async () => {
+                    const scoreData = {
+                      pain_score: managedPatient.pain_score ?? null,
+                      consciousness:
+                        managedPatient.consciousness || "",
+                      acuity: managedPatient.acuity || "",
+                      blood_pressure:
+                        managedPatient.blood_pressure || "",
+                      pulse: managedPatient.pulse ?? null,
+                      temperature:
+                        managedPatient.temperature ?? null,
+                      respiratory_rate:
+                        managedPatient.respiratory_rate ?? null,
+                      oxygen_saturation:
+                        managedPatient.oxygen_saturation ?? null,
+                    };
+
+                    const { data: existing } = await supabase
+                      .from("triage_management")
+                      .select("id")
+                      .eq("triage_id", managedPatient.id)
+                      .maybeSingle();
+
+                    let error;
+
+                    if (existing) {
+                      ({ error } = await supabase
+                        .from("triage_management")
+                        .update({
+                          score_data: scoreData,
+                          updated_at: new Date().toISOString(),
+                        })
+                        .eq("id", existing.id));
+                    } else {
+                      ({ error } = await supabase
+                        .from("triage_management")
+                        .insert([{
+                          triage_id: managedPatient.id,
+                          score_data: scoreData,
+                          created_by: user.id,
+                        }]));
+                    }
+
+                    if (error) {
+                      alert(error.message);
+                      return;
+                    }
+
+                    alert("Triage score saved successfully.");
+                  }}
+                >
+                  💾 Save Score
+                </button>
+              </div>
+            </div>
+          )}
+
+          {manageTab === "Add Note" && (
+            <div style={styles.formBox}>
+              <h3>📝 Add Professional Note</h3>
+
+              <p>
+                Patient: <strong>{managedPatient.patient_number}</strong>
+              </p>
+
+              <textarea
+                id="triage-professional-note"
+                placeholder="Enter any relevant professional note..."
+                style={{
+                  width: "100%",
+                  minHeight: "160px",
+                  padding: "12px",
+                  boxSizing: "border-box",
+                  border: "1px solid #ccc",
+                  borderRadius: "8px",
+                  resize: "vertical",
+                }}
+              />
+
+              <button
+                style={{
+                  ...styles.triageButton,
+                  marginTop: "12px",
+                }}
+                onClick={async () => {
+                  const note =
+                    document.getElementById(
+                      "triage-professional-note"
+                    )?.value.trim() || "";
+
+                  if (!note) {
+                    alert("Please enter a note first.");
+                    return;
+                  }
+
+                  const { data: existing, error: findError } =
+                    await supabase
+                      .from("triage_management")
+                      .select("id")
+                      .eq("triage_id", managedPatient.id)
+                      .maybeSingle();
+
+                  if (findError) {
+                    alert(findError.message);
+                    return;
+                  }
+
+                  let error;
+
+                  if (existing) {
+                    ({ error } = await supabase
+                      .from("triage_management")
+                      .update({
+                        professional_note: note,
+                        updated_at: new Date().toISOString(),
+                      })
+                      .eq("id", existing.id));
+                  } else {
+                    ({ error } = await supabase
+                      .from("triage_management")
+                      .insert([{
+                        triage_id: managedPatient.id,
+                        professional_note: note,
+                        created_by: user.id,
+                      }]));
+                  }
+
+                  if (error) {
+                    alert(error.message);
+                    return;
+                  }
+
+                  alert("Professional note saved successfully.");
+                }}
+              >
+                💾 Save Note
+              </button>
+            </div>
+          )}
+
+          <div style={{
+            marginTop: "20px",
+            paddingTop: "15px",
+            borderTop: "1px solid #ddd",
+          }}>
+            <div style={{
+              padding: "15px",
+              border: "1px solid #ddd",
+              borderRadius: "8px",
+              marginBottom: "15px",
+            }}>
+              <h4>🚪 Dispose Patient</h4>
+
+              <select
+                id="triage-dispose-destination"
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  marginBottom: "10px",
+                }}
+                value={triageDestination}
+                onChange={(e) => {
+                  setTriageDestination(e.target.value);
+                  setTriageOpdModule("");
+                  setTriageOpdDepartment("");
+                  setTriageProfessionalScope("");
+                }}
+              >
+                <option value="">Select Destination</option>
+                <option value="OPD">OPD</option>
+                <option value="Emergency">Emergency</option>
+                <option value="Pediatrics">Pediatrics</option>
+                <option value="Internal Medicine">
+                  Internal Medicine
+                </option>
+                <option value="Surgery">Surgery</option>
+                <option value="Gynecology">Gynecology</option>
+                <option value="Dentistry">Dentistry</option>
+                <option value="Scope">Current Scope</option>
+              </select>
+
+              {triageDestination === "OPD" && (
+                <div style={{ marginBottom: "10px" }}>
+              {triageDestination === "OPD" && triageOpdModule && (
+                <div style={{ marginBottom: "10px" }}>
+                  <select
+                    value={triageOpdDepartment}
+                    onChange={(e) => setTriageOpdDepartment(e.target.value)}
+                    style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+                  >
+                    <option value="">Select Examination Department</option>
+                    {triageOpdModule === "General OPD" && <>
+                      <option value="General Medical">General Medical</option>
+                      <option value="Surgical">Surgical</option>
+                      <option value="Pediatrics">Pediatrics</option>
+                      <option value="Gynecology">Gynecology</option>
+                      <option value="MRC">MRC</option>
+                      <option value="SRC">SRC</option>
+                      <option value="PRC">PRC</option>
+                      <option value="GRC">GRC</option>
+                      <option value="Staff Clinic">Staff Clinic</option>
+                      <option value="HPN & DM Clinic">HPN & DM Clinic</option>
+                      <option value="Report">Report</option>
+                    </>}
+                    {triageOpdModule === "MNCH" && <>
+                      <option value="Family Planning">Family Planning</option>
+                      <option value="ANC Clinic">ANC Clinic</option>
+                      <option value="PNC Clinic">PNC Clinic</option>
+                      <option value="Cervical Ca Screening">Cervical Ca Screening</option>
+                      <option value="PMTCT Clinic">PMTCT Clinic</option>
+                      <option value="Neonatal Clinic">Neonatal Clinic</option>
+                      <option value="CAC Clinic">CAC Clinic</option>
+                      <option value="Nutrition Clinic">Nutrition Clinic</option>
+                      <option value="Immunization Clinic">Immunization Clinic</option>
+                      <option value="Report">Report</option>
+                    </>}
+                    {!["General OPD", "MNCH"].includes(triageOpdModule) && <option value={triageOpdModule}>{triageOpdModule}</option>}
+                  </select>
+                </div>
+              )}
+
+
+                  <select
+                    value={triageOpdModule}
+                    onChange={(e) => {
+                      setTriageOpdModule(e.target.value);
+                      setTriageOpdDepartment("");
+                    }}
+                    style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+                  >
+                    <option value="">Select OPD Module</option>
+                    <option value="General OPD">General OPD</option>
+                    <option value="MNCH">MNCH</option>
+                    <option value="TB & HIV Clinic">TB & HIV Clinic</option>
+                    <option value="Specialty Clinic">Specialty Clinic</option>
+                    <option value="Procedure OPD">Procedure OPD</option>
+                    <option value="Procedure Room">Procedure Room</option>
+                    <option value="Ophthalmology Clinic">Ophthalmology Clinic</option>
+                    <option value="Refill Clinic">Refill Clinic</option>
+                    <option value="Risk Assessment">Risk Assessment</option>
+                    <option value="Board Clinic">Board Clinic</option>
+                    <option value="Private Clinic">Private Clinic</option>
+                    <option value="Report">Report</option>
+                  </select>
+                </div>
+              )}
+
+              {triageDestination === "OPD" && triageOpdModule && triageOpdDepartment && (
+                <div style={{ marginBottom: "10px" }}>
+                  <select
+                    value={triageProfessionalScope}
+                    onChange={(e) => setTriageProfessionalScope(e.target.value)}
+                    style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+                  >
+                    <option value="">Select Professional Scope</option>
+                    <option value="Senior">Senior</option>
+                    <option value="R4">R4</option>
+                    <option value="R3">R3</option>
+                    <option value="R2">R2</option>
+                    <option value="R1">R1</option>
+                    <option value="HO">HO</option>
+                    <option value="GP">GP</option>
+                    <option value="INTERN">INTERN</option>
+                    <option value="Midwife/Nurse">Midwife/Nurse</option>
+                  </select>
+                </div>
+              )}
+
+              <button
+                style={styles.triageButton}
+                onClick={async () => {
+                  const select =
+                    document.getElementById(
+                      "triage-dispose-destination"
+                    );
+
+                  let destination = select?.value || "";
+
+                  if (!destination) {
+                    alert("Please select a destination first.");
+                    return;
+                  }
+
+                  if (destination === "Scope") {
+                    destination = managedPatient.scope || "";
+
+                    if (!destination) {
+                      alert("Current scope is not available.");
+                      return;
+                    }
+                  }
+
+                  const { data: existing, error: findError } =
+                    await supabase
+                      .from("triage_management")
+                      .select("id")
+                      .eq("triage_id", managedPatient.id)
+                      .maybeSingle();
+
+                  if (findError) {
+                    alert(findError.message);
+                    return;
+                  }
+
+                  let error;
+
+                  if (existing) {
+                    ({ error } = await supabase
+                      .from("triage_management")
+                      .update({
+                        disposed: true,
+                        disposed_to: destination,
+                        updated_at: new Date().toISOString(),
+                      })
+                      .eq("id", existing.id));
+                  } else {
+                    ({ error } = await supabase
+                      .from("triage_management")
+                      .insert([{
+                        triage_id: managedPatient.id,
+                        disposed: true,
+                        disposed_to: destination,
+                        created_by: user.id,
+                      }]));
+                  }
+
+                  if (error) {
+                    alert(error.message);
+                    return;
+                  }
+
+                  const { error: triageError } = await supabase
+                    .from("triage_records")
+                    .update({
+                      disposition: "Disposed to: " + destination,
+                    })
+                    .eq("id", managedPatient.id);
+
+                  if (triageError) {
+                    alert(
+                      "Management was saved, but triage status update failed: " +
+                      triageError.message
+                    );
+                    return;
+                  }
+
+                  setManagedPatient({
+                    ...managedPatient,
+                    disposition: "Disposed to: " + destination,
+                  });
+
+                  await loadRecords();
+
+                  if (destination === "OPD") {
+                    if (!triageOpdModule || !triageOpdDepartment || !triageProfessionalScope) {
+                      alert("Please select OPD module, examination department, and professional scope.");
+                      return;
+                    }
+
+                    goBilling({
+                      patient_number: managedPatient.patient_number,
+                      appointment_id: managedPatient.appointment_id,
+                      triage_id: managedPatient.id,
+                      department: triageOpdDepartment,
+                      opd_module: triageOpdModule,
+                      professional_scope: triageProfessionalScope,
+                    }, "Registration Fee");
+                    return;
+                  }
+
+                  alert(
+                    "Patient disposed successfully to " +
+                    destination +
+                    "."
+                  );
+                }}
+              >
+                🚪 Dispose Patient
+              </button>
+            </div>
+
+            <button
+              style={styles.doctorButton}
+              onClick={() =>
+                goDoctor({
+                  patient_number: managedPatient.patient_number,
+                  appointment_id: managedPatient.appointment_id,
+                  triage_id: managedPatient.id,
+                  department: managedPatient.scope,
+                })
+              }
+            >
+              👨‍⚕️ Doctor Review
+            </button>
+
+            <button
+              style={styles.mrButton}
+              onClick={() =>
+                goMedicalRecord({
+                  patient_number: managedPatient.patient_number,
+                  appointment_date: managedPatient.triage_date,
+                  department: managedPatient.scope,
+                })
+              }
+            >
+              📋 MR Retrieve
+            </button>
+          </div>
+        </div>
+      )}
+
+
       {selected && (
         <div style={styles.detailsBox}>
           <div style={styles.row}>
@@ -2160,50 +3577,60 @@ function Triage({
           <table style={styles.table}>
             <thead>
               <tr>
-                <th style={styles.th}>Patient</th>
-                <th style={styles.th}>Date</th>
-                <th style={styles.th}>Acuity</th>
-                <th style={styles.th}>Scope</th>
-                <th style={styles.th}>Disposition</th>
-                <th style={styles.th}>Actions</th>
+                <th style={styles.th}>Card Number</th>
+                <th style={styles.th}>Full Name</th>
+                <th style={styles.th}>Age</th>
+                <th style={styles.th}>Sex</th>
+                <th style={styles.th}>Phone</th>
+                <th style={styles.th}>Dispose From</th>
+                <th style={styles.th}>Manage</th>
               </tr>
             </thead>
 
             <tbody>
-              {filtered.map((record) => (
-                <tr key={record.id}>
-                  <td style={styles.td}>{record.patient_number}</td>
-                  <td style={styles.td}>{record.triage_date}</td>
-                  <td style={styles.td}>{record.acuity || "-"}</td>
-                  <td style={styles.td}>{record.scope || "-"}</td>
-                  <td style={styles.td}>
-                    {record.disposition || "-"}
-                  </td>
+              {filtered.map((record) => {
+                const patient = getTriagePatient(record.patient_number);
 
-                  <td style={styles.td}>
-                    <button
-                      style={styles.viewButton}
-                      onClick={() => setSelected(record)}
-                    >
-                      👁️ View
-                    </button>
+                return (
+                  <tr key={record.id}>
+                    <td style={styles.td}>
+                      {patient?.card_number || "-"}
+                    </td>
 
-                    <button
-                      style={styles.doctorButtonSmall}
-                      onClick={() =>
-                        goDoctor({
-                          patient_number: record.patient_number,
-                          appointment_id: record.appointment_id,
-                          triage_id: record.id,
-                          department: record.scope,
-                        })
-                      }
-                    >
-                      👨‍⚕️ Doctor
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td style={styles.td}>
+                      {getTriagePatientName(record.patient_number)}
+                    </td>
+
+                    <td style={styles.td}>
+                      {getTriagePatientAge(patient)}
+                    </td>
+
+                    <td style={styles.td}>
+                      {patient?.sex || "-"}
+                    </td>
+
+                    <td style={styles.td}>
+                      {patient?.phone || "-"}
+                    </td>
+
+                    <td style={styles.td}>
+                      {patient?.referred_from || "-"}
+                    </td>
+
+                    <td style={styles.td}>
+                      <button
+                        style={styles.triageButton}
+                        onClick={() => {
+                          setManagedPatient(record);
+                          setManageTab("Patient View");
+                        }}
+                      >
+                        ⚙️ Manage
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -2218,6 +3645,7 @@ function DoctorConsultation({
   appointment,
   user,
   goBack,
+  billingSection,
   goMedicalRecord,
   goBilling,
 }) {
@@ -2950,6 +4378,9 @@ function Pharmacy({ appointment, user, goBack }) {
   const [showForm, setShowForm] =
     useState(false);
 
+  const [pharmacyPrescriptions, setPharmacyPrescriptions] =
+    useState([]);
+
   const [form, setForm] = useState({
     medication_name: "",
     strength: "",
@@ -3072,13 +4503,33 @@ function Pharmacy({ appointment, user, goBack }) {
   }
 
   async function dispense(item) {
-    const { error } =
-      await supabase
-        .from("prescriptions")
-        .update({
-          status: "Dispensed",
-        })
-        .eq("id", item.id);
+    const { data: bill, error: billError } = await supabase
+      .from("billing_transactions")
+      .select("payment_status")
+      .eq("patient_number", item.patient_number)
+      .eq("service_type", "Pharmacy")
+      .eq("service_id", item.id)
+      .maybeSingle();
+
+    if (billError) {
+      alert("Unable to check pharmacy payment: " + billError.message);
+      return;
+    }
+
+    if (!bill) {
+      alert("Pharmacy payment record not found. Please create the pharmacy bill first.");
+      return;
+    }
+
+    if (bill.payment_status !== "Paid") {
+      alert("Pharmacy payment is not completed. Dispensing is not allowed until payment is Paid.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("prescriptions")
+      .update({ status: "Dispensed" })
+      .eq("id", item.id);
 
     if (error) {
       alert(error.message);
@@ -3087,7 +4538,6 @@ function Pharmacy({ appointment, user, goBack }) {
 
     await loadPrescriptions();
   }
-
   return (
     <div style={styles.panel}>
       <div style={styles.row}>
@@ -3294,6 +4744,7 @@ function MedicalRecord({
   appointment,
   user,
   goBack,
+  billingSection,
   goBilling,
 }) {
   const [history, setHistory] =
@@ -3657,12 +5108,39 @@ function Billing({
   appointment,
   user,
   goBack,
+  billingSection,
 }) {
   const [transactions, setTransactions] =
     useState([]);
 
   const [showForm, setShowForm] =
     useState(false);
+
+  const [registrationTab, setRegistrationTab] =
+    useState("Active Patients");
+
+  const [registrationPatients, setRegistrationPatients] =
+    useState([]);
+
+  const [registrationManage, setRegistrationManage] =
+    useState(null);
+
+  const [registrationForm, setRegistrationForm] = useState({
+    registration_type: "Regular registration",
+    payment_type: "Self Care",
+    payment_method_detail: "",
+    cbhi_woreda: "",
+    cbhi_id: "",
+    credit_company: "",
+    credit_company_id: "",
+    staff_shi: "",
+    social_exempted_reason: "",
+    rta_detail: "",
+    reception_number: "",
+    payment_status: "Unpaid",
+    payment_date: new Date().toISOString().slice(0, 10),
+    payment_time: new Date().toTimeString().slice(0, 5),
+  });
 
   const [form, setForm] = useState({
     description: "",
@@ -3675,7 +5153,55 @@ function Billing({
 
   useEffect(() => {
     loadTransactions();
-  }, [appointment]);
+    if (billingSection === "Pharmacy Bill") {
+      loadPharmacyBilling();
+    }
+    if (billingSection === "Registration Fee") {
+      loadRegistrationPatients();
+    }
+  }, [appointment, billingSection]);
+
+  useEffect(() => {
+    if (billingSection === "Registration Fee") {
+      loadRegistrationPatients();
+    }
+  }, [registrationTab]);
+
+  async function loadRegistrationPatients() {
+    const { data: patients, error } = await supabase
+      .from("patients")
+      .select("*")
+      .order("patient_number", { ascending: false });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    const patientList = patients || [];
+
+    const { data: paidBills, error: paidError } = await supabase
+      .from("billing_transactions")
+      .select("patient_number")
+      .eq("service_type", "Registration")
+      .eq("payment_status", "Paid");
+
+    if (paidError) {
+      alert(paidError.message);
+      return;
+    }
+
+    const paidNumbers = new Set(
+      (paidBills || []).map((item) => item.patient_number)
+    );
+
+    const filtered = patientList.filter((patient) => {
+      const paid = paidNumbers.has(patient.patient_number);
+      return registrationTab === "Active Patients" ? !paid : paid;
+    });
+
+    setRegistrationPatients(filtered);
+  }
 
   async function loadTransactions() {
     let query = supabase
@@ -3758,6 +5284,21 @@ function Billing({
         form.notes || null,
 
       created_by: user.id,
+
+      service_type:
+        billingSection === "Registration Fee" ? "Registration" :
+        billingSection === "Appointment Fee" ? "Appointment" :
+        billingSection === "Emergency Service Bill" ? "Emergency" :
+        billingSection === "Outpatient Service Bill" ? "Outpatient" :
+        billingSection === "Inpatient Service Bill" ? "Inpatient" :
+        billingSection === "OBS Service Bill" ? "OBS" :
+        billingSection === "Pharmacy Bill" ? "Pharmacy" :
+        null,
+
+      service_id:
+        appointment.service_id
+          ? Number(appointment.service_id)
+          : null,
     };
 
     const { error } =
@@ -3780,6 +5321,62 @@ function Billing({
     });
 
     setShowForm(false);
+    await loadTransactions();
+  }
+
+  async function saveRegistrationPayment() {
+    if (!registrationManage?.patient_number) {
+      alert("Please select a patient first.");
+      return;
+    }
+
+    const prices = {
+      "Regular registration": 35,
+      "Emergency register": 40,
+      "Appointment register": 35,
+    };
+
+    const amount = prices[registrationForm.registration_type] || 35;
+
+    const data = {
+      patient_number: registrationManage.patient_number,
+      appointment_id: registrationManage.appointment_id ? Number(registrationManage.appointment_id) : null,
+      transaction_date: registrationForm.payment_date,
+      description: registrationForm.registration_type,
+      quantity: 1,
+      unit_price: amount,
+      total_amount: amount,
+      payment_status: registrationForm.payment_status,
+      payment_method: registrationForm.payment_type === "Self Care" ? registrationForm.payment_method_detail || null : null,
+      payment_type: registrationForm.payment_type,
+      registration_type: registrationForm.registration_type,
+      payment_date: registrationForm.payment_date,
+      payment_time: registrationForm.payment_time,
+      reception_number: registrationForm.reception_number || null,
+      payment_method_detail: registrationForm.payment_method_detail || null,
+      cbhi_woreda: registrationForm.cbhi_woreda || null,
+      cbhi_id: registrationForm.cbhi_id || null,
+      credit_company: registrationForm.credit_company || null,
+      credit_company_id: registrationForm.credit_company_id || null,
+      staff_shi: registrationForm.staff_shi || null,
+      social_exempted_reason: registrationForm.social_exempted_reason || null,
+      rta_detail: registrationForm.rta_detail || null,
+      service_type: "Registration",
+      created_by: user.id,
+    };
+
+    const { error } = await supabase
+      .from("billing_transactions")
+      .insert([data]);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    alert("Registration payment saved successfully.");
+    setRegistrationManage(null);
+    await loadRegistrationPatients();
     await loadTransactions();
   }
 
@@ -3833,6 +5430,22 @@ function Billing({
         </div>
       </div>
 
+      {billingSection === "Registration Fee" && (
+        <div style={styles.formBox}>
+          <h3>🧾 Registration Fee</h3>
+          <div style={{display:"flex",gap:"10px",marginBottom:"20px"}}>
+            <button style={registrationTab === "Active Patients" ? styles.paymentButton : styles.cancelButton} onClick={() => setRegistrationTab("Active Patients")}>Active Patients</button>
+            <button style={registrationTab === "All Patient" ? styles.paymentButton : styles.cancelButton} onClick={() => setRegistrationTab("All Patient")}>All Patient</button>
+          </div>
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <thead><tr><th style={styles.th}>Patient Number</th><th style={styles.th}>First Name</th><th style={styles.th}>Father Name</th><th style={styles.th}>Manage</th></tr></thead>
+              <tbody>{registrationPatients.length === 0 ? <tr><td colSpan="4" style={styles.td}>No patients found.</td></tr> : registrationPatients.map((patient) => <tr key={patient.patient_number}><td style={styles.td}>{patient.patient_number}</td><td style={styles.td}>{patient.first_name || "-"}</td><td style={styles.td}>{patient.father_name || "-"}</td><td style={styles.td}><button style={styles.paymentButton} onClick={() => setRegistrationManage(patient)}>Manage</button></td></tr>)}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {appointment && (
         <div style={styles.linkedAppointment}>
           <Detail
@@ -3844,6 +5457,48 @@ function Billing({
             label="Appointment Date"
             value={appointment.appointment_date}
           />
+        </div>
+      )}
+
+      {billingSection === "Registration Fee" && registrationManage && (
+        <div style={styles.formBox}>
+          <h3>👤 Patient Management</h3>
+          <div style={{display:"flex",gap:"10px",marginBottom:"20px"}}>
+            <button style={styles.paymentButton} onClick={async () => { const {data}=await supabase.from("billing_transactions").select("*").eq("patient_number",registrationManage.patient_number).eq("service_type","Registration").order("id",{ascending:false}); alert((data||[]).length ? data.map(x => "Date: "+(x.payment_date||x.transaction_date||"-")+"\nTime: "+(x.payment_time||"-")+"\nType: "+(x.registration_type||"-")+"\nAmount: "+(x.total_amount||0)+"\nPayment: "+(x.payment_type||"-")+"\nStatus: "+(x.payment_status||"-")+"\nReception: "+(x.reception_number||"-")).join("\n----------------\n") : "No registration payment history found."); }}>View</button>
+            <button style={styles.paymentButton} onClick={() => setRegistrationForm({...registrationForm,payment_date:new Date().toISOString().slice(0,10),payment_time:new Date().toTimeString().slice(0,5),payment_status:"Paid"})}>Registration Payment</button>
+            <button style={styles.cancelButton} onClick={() => setRegistrationManage(null)}>Close</button>
+          </div>
+          <div style={styles.linkedAppointment}>
+            <Detail label="Patient Number" value={registrationManage.patient_number} />
+            <Detail label="First Name" value={registrationManage.first_name} />
+            <Detail label="Father Name" value={registrationManage.father_name} />
+          </div>
+        </div>
+      )}
+
+      {billingSection === "Registration Fee" && registrationManage && (
+        <div style={{marginTop:"20px",padding:"20px",border:"1px solid #ddd",borderRadius:"10px"}}>
+          <h3>💳 Registration Payment</h3>
+          <div style={styles.formGrid}>
+            <select value={registrationForm.registration_type} onChange={(e)=>setRegistrationForm({...registrationForm,registration_type:e.target.value})}>
+              <option>Regular registration</option><option>Emergency register</option><option>Appointment register</option>
+            </select>
+            <input value={registrationForm.reception_number} onChange={(e)=>setRegistrationForm({...registrationForm,reception_number:e.target.value})} placeholder="Reception Number" />
+            <select value={registrationForm.payment_type} onChange={(e)=>setRegistrationForm({...registrationForm,payment_type:e.target.value})}>
+              <option>Self Care</option><option>CBHI</option><option>Credit</option><option>Staff</option><option>Social Exempted</option><option>RTA</option>
+            </select>
+            <input value={registrationForm.payment_date} readOnly />
+            <input value={registrationForm.payment_time} readOnly />
+            <select value={registrationForm.payment_status} onChange={(e)=>setRegistrationForm({...registrationForm,payment_status:e.target.value})}><option>Paid</option><option>Unpaid</option></select>
+            {registrationForm.payment_type === "Self Care" && <select value={registrationForm.payment_method_detail} onChange={(e)=>setRegistrationForm({...registrationForm,payment_method_detail:e.target.value})}><option value="">Payment Method</option><option>Cash</option><option>check</option><option>Bank deposit Slip</option><option>Bank Transfer</option><option>Other</option></select>}
+            {registrationForm.payment_type === "CBHI" && <><select value={registrationForm.cbhi_woreda} onChange={(e)=>setRegistrationForm({...registrationForm,cbhi_woreda:e.target.value})}><option value="">Woreda</option><option>Addis Ababa</option><option>Other Woreda</option></select><input value={registrationForm.cbhi_id} onChange={(e)=>setRegistrationForm({...registrationForm,cbhi_id:e.target.value})} placeholder="CBHI ID" /></>}
+            {registrationForm.payment_type === "Credit" && <><select value={registrationForm.credit_company} onChange={(e)=>setRegistrationForm({...registrationForm,credit_company:e.target.value})}><option value="">Credit Company</option><option>Company 1</option><option>Company 2</option><option>Other</option></select><input value={registrationForm.credit_company_id} onChange={(e)=>setRegistrationForm({...registrationForm,credit_company_id:e.target.value})} placeholder="Company ID" /></>}
+            {registrationForm.payment_type === "Staff" && <input value={registrationForm.staff_shi} onChange={(e)=>setRegistrationForm({...registrationForm,staff_shi:e.target.value})} placeholder="Staff / SHI" />}
+            {registrationForm.payment_type === "Social Exempted" && <input value={registrationForm.social_exempted_reason} onChange={(e)=>setRegistrationForm({...registrationForm,social_exempted_reason:e.target.value})} placeholder="Social Exempted" />}
+            {registrationForm.payment_type === "RTA" && <input value={registrationForm.rta_detail} onChange={(e)=>setRegistrationForm({...registrationForm,rta_detail:e.target.value})} placeholder="RTA Details" />}
+          </div>
+          <div style={{marginTop:"15px"}}><strong>Amount: </strong>{registrationForm.registration_type === "Emergency register" ? 40 : 35}</div>
+          <button type="button" style={{...styles.paymentButton,marginTop:"15px"}} onClick={saveRegistrationPayment}>💾 Save Registration Payment</button>
         </div>
       )}
 
@@ -4218,6 +5873,8 @@ const styles = {
   overlayDropdown: {
     position: "absolute",
     top: "calc(100% + 10px)",
+    maxHeight: "none",
+    overflow: "visible",
     left: 0,
     width: "360px",
     maxWidth: "calc(100vw - 24px)",
@@ -4248,6 +5905,8 @@ const styles = {
   },
   overlayPrimaryList: {
     display: "flex",
+    position: "relative",
+    overflow: "visible",
     flexDirection: "column",
     gap: "8px",
   },
@@ -4283,7 +5942,8 @@ const styles = {
   },
   overlayFlyout: {
     position: "absolute",
-    top: "58px",
+    zIndex: 10000,
+    top: 0,
     left: "calc(100% + 10px)",
     width: "330px",
     maxWidth: "calc(100vw - 24px)",
@@ -4292,7 +5952,8 @@ const styles = {
     borderRadius: "16px",
     boxShadow: "0 24px 60px rgba(15, 23, 42, 0.25)",
     padding: "12px",
-    zIndex: 5001,
+    overflow: "visible",
+    zIndex: 10000,
   },
   overlayFlyoutItem: {
     width: "100%",
