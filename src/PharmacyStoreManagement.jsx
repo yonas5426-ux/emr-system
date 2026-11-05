@@ -44,6 +44,13 @@ export default function PharmacyStoreManagement({ user }) {
   const [stockStatusRows, setStockStatusRows] = useState([]);
   const [wasteRecords, setWasteRecords] = useState([]);
   const [wasteBalances, setWasteBalances] = useState([]);
+  const [inventoryCounts, setInventoryCounts] = useState([]);
+  const [inventoryCountItems, setInventoryCountItems] = useState([]);
+  const [inventoryBalances, setInventoryBalances] = useState([]);
+  const [discrepancyForm, setDiscrepancyForm] = useState({
+    balance_index: "", count_date: new Date().toISOString().slice(0, 10),
+    physical_quantity: "", variance_reason: "", notes: "",
+  });
   const [wasteForm, setWasteForm] = useState({ balance_index: "", waste_date: new Date().toISOString().slice(0, 10), quantity: "1", waste_reason: "", notes: "" });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,7 +101,7 @@ export default function PharmacyStoreManagement({ user }) {
     setLoading(true);
     setMessage("");
 
-    const [itemResult, supplierResult, receiptResult, binResult, stockResult, wasteResult, balanceResult] = await Promise.all([
+    const [itemResult, supplierResult, receiptResult, binResult, stockResult, wasteResult, balanceResult, inventoryResult, inventoryBalanceResult] = await Promise.all([
       supabase.from("pharmacy_store_items")
         .select("*").eq("store_type", storeType)
         .eq("is_active", true).order("item_name"),
@@ -115,6 +122,12 @@ export default function PharmacyStoreManagement({ user }) {
       supabase.from("pharmacy_store_stock_balances")
         .select("*").eq("store_type", storeType)
         .gt("stock_quantity", 0).order("item_name", { ascending: true }),
+      supabase.from("pharmacy_store_inventory_counts")
+        .select("*").eq("store_type", storeType)
+        .order("created_at", { ascending: false }).limit(100),
+      supabase.from("pharmacy_store_stock_balances")
+        .select("*").eq("store_type", storeType)
+        .order("item_name", { ascending: true }),
     ]);
 
     if (itemResult.error) notify(itemResult.error.message, "error");
@@ -149,6 +162,36 @@ export default function PharmacyStoreManagement({ user }) {
       notify("Stock balances for waste could not load: " + balanceResult.error.message, "error");
     } else {
       setWasteBalances(balanceResult.data || []);
+    }
+
+    if (inventoryBalanceResult.error) {
+      setInventoryBalances([]);
+      notify("Inventory stock balances could not load: " + inventoryBalanceResult.error.message, "error");
+    } else {
+      setInventoryBalances(inventoryBalanceResult.data || []);
+    }
+
+    if (inventoryResult.error) {
+      setInventoryCounts([]);
+      setInventoryCountItems([]);
+      notify("Inventory counts could not load: " + inventoryResult.error.message, "error");
+    } else {
+      const countRows = inventoryResult.data || [];
+      setInventoryCounts(countRows);
+      if (countRows.length) {
+        const countIds = countRows.map((row) => row.id);
+        const countItemResult = await supabase
+          .from("pharmacy_store_inventory_count_items")
+          .select("*").in("inventory_count_id", countIds);
+        if (countItemResult.error) {
+          setInventoryCountItems([]);
+          notify("Inventory count details could not load: " + countItemResult.error.message, "error");
+        } else {
+          setInventoryCountItems(countItemResult.data || []);
+        }
+      } else {
+        setInventoryCountItems([]);
+      }
     }
 
     if (receiptResult.error) notify(receiptResult.error.message, "error");
@@ -587,6 +630,115 @@ export default function PharmacyStoreManagement({ user }) {
     if (error) notify("Waste approval failed: " + error.message, "error");
     else {
       notify(typeof data === "string" ? data : "Waste approved and stock adjusted.");
+      await loadStoreData();
+    }
+    setSaving(false);
+  }
+
+  async function saveDiscrepancy(event) {
+    event.preventDefault();
+    if (saving) return;
+    const balance = inventoryBalances[Number(discrepancyForm.balance_index)];
+    const physical = Number(discrepancyForm.physical_quantity);
+    if (!balance || Number(balance.item_id) !== Number(selectedBinItem?.id)) {
+      notify("Select the exact batch or asset being counted.", "error");
+      return;
+    }
+    if (!Number.isFinite(physical) || physical < 0) {
+      notify("Physical quantity must be zero or greater.", "error");
+      return;
+    }
+    const systemQuantity = Number(balance.stock_quantity || 0);
+    const variance = physical - systemQuantity;
+    if (Math.abs(variance) < 0.000001) {
+      notify("There is no discrepancy: physical quantity equals system stock.", "error");
+      return;
+    }
+    if (!discrepancyForm.variance_reason.trim()) {
+      notify("Enter the reason for the stock discrepancy.", "error");
+      return;
+    }
+
+    setSaving(true);
+    const countNumber = "INV-" + Date.now();
+    const { data: count, error: countError } = await supabase
+      .from("pharmacy_store_inventory_counts")
+      .insert({
+        store_type: storeType,
+        count_number: countNumber,
+        count_date: discrepancyForm.count_date,
+        count_type: "Spot Check",
+        count_status: "Draft",
+        counted_by: user?.id || null,
+        notes: discrepancyForm.notes.trim() || null,
+      })
+      .select().single();
+
+    if (countError) {
+      notify("Discrepancy record could not be created: " + countError.message, "error");
+      setSaving(false);
+      return;
+    }
+
+    const { error: lineError } = await supabase
+      .from("pharmacy_store_inventory_count_items")
+      .insert({
+        inventory_count_id: count.id,
+        item_id: Number(balance.item_id),
+        batch_number: balance.batch_number || null,
+        expiry_date: balance.expiry_date || null,
+        asset_code: balance.asset_code || null,
+        serial_number: balance.serial_number || null,
+        system_quantity: systemQuantity,
+        physical_quantity: physical,
+        variance,
+        variance_reason: discrepancyForm.variance_reason.trim(),
+        counted_by: user?.id || null,
+        notes: discrepancyForm.notes.trim() || null,
+      });
+
+    if (lineError) {
+      notify("Count #" + countNumber + " was created, but its discrepancy line failed: " + lineError.message + ". Check the Draft before creating another.", "error");
+      setSaving(false);
+      await loadStoreData();
+      return;
+    }
+
+    notify("Discrepancy saved as Draft. Stock has not changed.");
+    setDiscrepancyForm({
+      balance_index: "", count_date: new Date().toISOString().slice(0, 10),
+      physical_quantity: "", variance_reason: "", notes: "",
+    });
+    await loadStoreData();
+    setBinManageTab("discrepancy-view");
+    setSaving(false);
+  }
+
+  async function submitDiscrepancy(count) {
+    if (saving) return;
+    if (!window.confirm("Submit inventory count " + count.count_number + " for approval?")) return;
+    setSaving(true);
+    const { data, error } = await supabase.rpc("submit_pharmacy_store_inventory_count", {
+      p_count_id: Number(count.id),
+    });
+    if (error) notify("Discrepancy submission failed: " + error.message, "error");
+    else {
+      notify(typeof data === "string" ? data : "Discrepancy submitted for approval.");
+      await loadStoreData();
+    }
+    setSaving(false);
+  }
+
+  async function approveDiscrepancy(count) {
+    if (saving) return;
+    if (!window.confirm("Approve " + count.count_number + "? This posts the variance to the stock ledger.")) return;
+    setSaving(true);
+    const { data, error } = await supabase.rpc("approve_pharmacy_store_inventory_count", {
+      p_count_id: Number(count.id),
+    });
+    if (error) notify("Discrepancy approval failed: " + error.message, "error");
+    else {
+      notify(typeof data === "string" ? data : "Discrepancy approved and stock adjusted.");
       await loadStoreData();
     }
     setSaving(false);
@@ -1085,16 +1237,118 @@ export default function PharmacyStoreManagement({ user }) {
                 )}
 
                 {binManageTab === "discrepancy-record" && (
-                  <div style={{ padding: 16, background: "#f8fafc", borderRadius: 8 }}>
+                  <form onSubmit={saveDiscrepancy} style={{ padding: 16, background: "#f8fafc", borderRadius: 8, maxWidth: 850 }}>
                     <h4>Discrepancy Record — {selectedBinItem.item_name}</h4>
-                    <p>የPhysical Count እና System Stock ልዩነት መመዝገቢያ በሚቀጥለው ደረጃ ከInventory Count እና Approval ጋር እናገናኘዋለን።</p>
-                  </div>
+                    <p style={{ color: "#64748b" }}>Record a physical spot count against the exact batch or asset. Stock changes only after approval.</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+                      <div>
+                        <label style={labelStyle}>Batch / Asset / Serial *</label>
+                        <select required style={inputStyle} value={discrepancyForm.balance_index}
+                          onChange={(e) => setDiscrepancyForm((old) => ({ ...old, balance_index: e.target.value, physical_quantity: "" }))}>
+                          <option value="">Select stock batch or asset</option>
+                          {inventoryBalances.map((b, index) => ({ b, index }))
+                            .filter(({ b }) => Number(b.item_id) === Number(selectedBinItem.id))
+                            .map(({ b, index }) => (
+                              <option key={index} value={index}>
+                                {b.batch_number || b.asset_code || b.serial_number || "Unidentified stock"} | System: {Number(b.stock_quantity || 0).toLocaleString()}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Count Date *</label>
+                        <input required type="date" style={inputStyle} value={discrepancyForm.count_date}
+                          onChange={(e) => setDiscrepancyForm((old) => ({ ...old, count_date: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>System Quantity</label>
+                        <input readOnly style={{ ...inputStyle, background: "#e2e8f0" }}
+                          value={discrepancyForm.balance_index !== "" && inventoryBalances[Number(discrepancyForm.balance_index)]
+                            ? Number(inventoryBalances[Number(discrepancyForm.balance_index)].stock_quantity || 0)
+                            : ""} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Physical Quantity *</label>
+                        <input required type="number" min="0" step="any" style={inputStyle}
+                          value={discrepancyForm.physical_quantity}
+                          onChange={(e) => setDiscrepancyForm((old) => ({ ...old, physical_quantity: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Variance</label>
+                        <input readOnly style={{ ...inputStyle, background: "#e2e8f0" }}
+                          value={discrepancyForm.balance_index !== "" && discrepancyForm.physical_quantity !== "" && inventoryBalances[Number(discrepancyForm.balance_index)]
+                            ? (Number(discrepancyForm.physical_quantity) - Number(inventoryBalances[Number(discrepancyForm.balance_index)].stock_quantity || 0)).toLocaleString()
+                            : ""} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Reason for Discrepancy *</label>
+                        <select required style={inputStyle} value={discrepancyForm.variance_reason}
+                          onChange={(e) => setDiscrepancyForm((old) => ({ ...old, variance_reason: e.target.value }))}>
+                          <option value="">Select reason</option>
+                          {["Counting Error", "Unrecorded Issue", "Unrecorded Receipt", "Damage", "Loss", "Data Entry Error", "Other"].map((reason) => (
+                            <option key={reason} value={reason}>{reason}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}>
+                      <label style={labelStyle}>Notes / Explanation</label>
+                      <textarea rows="3" style={inputStyle} value={discrepancyForm.notes}
+                        onChange={(e) => setDiscrepancyForm((old) => ({ ...old, notes: e.target.value }))} />
+                    </div>
+                    <button type="submit" disabled={saving} style={{ ...primaryButton, marginTop: 14, opacity: saving ? 0.6 : 1 }}>
+                      {saving ? "Saving..." : "Save Discrepancy as Draft"}
+                    </button>
+                  </form>
                 )}
 
                 {binManageTab === "discrepancy-view" && (
-                  <div style={{ padding: 16, background: "#f8fafc", borderRadius: 8 }}>
-                    <h4>Discrepancy View — {selectedBinItem.item_name}</h4>
-                    <p>የዚህ መድሀኒት የDiscrepancy መዝገቦች ከApproval ሂደት ጋር በሚቀጥለው ደረጃ ይታያሉ።</p>
+                  <div style={{ overflowX: "auto" }}>
+                    <h4>Discrepancy History — {selectedBinItem.item_name}</h4>
+                    <p style={{ color: "#64748b" }}>Submitted counts require approval. Only approved variances are posted to the stock ledger.</p>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1050 }}>
+                      <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>
+                        {["Count No.", "Date", "Batch / Asset", "System Qty", "Physical Qty", "Variance", "Reason", "Status", "Action"].map((h) => (
+                          <th key={h} style={{ padding: 10, borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {inventoryCounts.filter((count) => inventoryCountItems.some((line) =>
+                          Number(line.inventory_count_id) === Number(count.id) && Number(line.item_id) === Number(selectedBinItem.id)
+                        )).map((count) => {
+                          const lines = inventoryCountItems.filter((line) =>
+                            Number(line.inventory_count_id) === Number(count.id) && Number(line.item_id) === Number(selectedBinItem.id)
+                          );
+                          return lines.map((line) => (
+                            <tr key={line.id}>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{count.count_number}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{count.count_date}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.batch_number || line.asset_code || line.serial_number || "—"}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.system_quantity || 0).toLocaleString()}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.physical_quantity || 0).toLocaleString()}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, color: Number(line.variance) < 0 ? "#b91c1c" : "#15803d" }}>{Number(line.variance || 0).toLocaleString()}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.variance_reason || "—"}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{count.count_status}</td>
+                              <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                                {count.count_status === "Draft" && (
+                                  <button type="button" disabled={saving} onClick={() => submitDiscrepancy(count)}
+                                    style={{ ...primaryButton, padding: "7px 10px" }}>Submit</button>
+                                )}
+                                {count.count_status === "Submitted" && (
+                                  <button type="button" disabled={saving} onClick={() => approveDiscrepancy(count)}
+                                    style={{ ...primaryButton, background: "#15803d", padding: "7px 10px" }}>Approve</button>
+                                )}
+                                {count.count_status === "Approved" && <span style={{ color: "#15803d", fontWeight: 700 }}>Completed</span>}
+                                {["Rejected", "Adjusted"].includes(count.count_status) && <span>{count.count_status}</span>}
+                              </td>
+                            </tr>
+                          ));
+                        })}
+                        {!inventoryCountItems.some((line) => Number(line.item_id) === Number(selectedBinItem.id)) && (
+                          <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#64748b" }}>No discrepancy records for this item.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </>
