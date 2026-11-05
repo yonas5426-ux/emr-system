@@ -47,6 +47,14 @@ export default function PharmacyStoreManagement({ user }) {
   const [inventoryCounts, setInventoryCounts] = useState([]);
   const [inventoryCountItems, setInventoryCountItems] = useState([]);
   const [inventoryBalances, setInventoryBalances] = useState([]);
+  const [inventoryForm, setInventoryForm] = useState({
+    count_date: new Date().toISOString().slice(0, 10),
+    count_type: "Periodic",
+    notes: "",
+  });
+  const [inventoryDraftLines, setInventoryDraftLines] = useState([
+    { balance_index: "", physical_quantity: "", variance_reason: "", notes: "" },
+  ]);
   const [discrepancyForm, setDiscrepancyForm] = useState({
     balance_index: "", count_date: new Date().toISOString().slice(0, 10),
     physical_quantity: "", variance_reason: "", notes: "",
@@ -739,6 +747,133 @@ export default function PharmacyStoreManagement({ user }) {
     if (error) notify("Discrepancy approval failed: " + error.message, "error");
     else {
       notify(typeof data === "string" ? data : "Discrepancy approved and stock adjusted.");
+      await loadStoreData();
+    }
+    setSaving(false);
+  }
+
+  function updateInventoryLine(index, fieldName, value) {
+    setInventoryDraftLines((old) => old.map((line, i) =>
+      i === index ? { ...line, [fieldName]: value } : line
+    ));
+  }
+
+  function addInventoryLine() {
+    setInventoryDraftLines((old) => [...old, {
+      balance_index: "", physical_quantity: "", variance_reason: "", notes: "",
+    }]);
+  }
+
+  function removeInventoryLine(index) {
+    setInventoryDraftLines((old) => old.filter((_, i) => i !== index));
+  }
+
+  async function saveInventoryCount(event) {
+    event.preventDefault();
+    if (saving) return;
+    if (!inventoryDraftLines.length) {
+      notify("Add at least one stock line to count.", "error");
+      return;
+    }
+
+    const seenBalances = new Set();
+    const linePayloads = [];
+    for (let i = 0; i < inventoryDraftLines.length; i++) {
+      const line = inventoryDraftLines[i];
+      if (line.balance_index === "") {
+        notify("Select a stock batch or asset on line " + (i + 1) + ".", "error");
+        return;
+      }
+      if (seenBalances.has(String(line.balance_index))) {
+        notify("The same stock batch or asset is selected more than once.", "error");
+        return;
+      }
+      seenBalances.add(String(line.balance_index));
+
+      const balance = inventoryBalances[Number(line.balance_index)];
+      const physical = Number(line.physical_quantity);
+      if (!balance || !Number.isFinite(physical) || physical < 0 || line.physical_quantity === "") {
+        notify("Enter a valid physical quantity on line " + (i + 1) + ".", "error");
+        return;
+      }
+      const system = Number(balance.stock_quantity || 0);
+      const variance = physical - system;
+      if (Math.abs(variance) > 0.000001 && !line.variance_reason.trim()) {
+        notify("A variance reason is required on line " + (i + 1) + ".", "error");
+        return;
+      }
+      linePayloads.push({
+        item_id: Number(balance.item_id),
+        batch_number: balance.batch_number || null,
+        expiry_date: balance.expiry_date || null,
+        asset_code: balance.asset_code || null,
+        serial_number: balance.serial_number || null,
+        system_quantity: system,
+        physical_quantity: physical,
+        variance,
+        variance_reason: line.variance_reason.trim() || null,
+        counted_by: user?.id || null,
+        notes: line.notes.trim() || null,
+      });
+    }
+
+    setSaving(true);
+    setMessage("");
+    const { data: count, error: countError } = await supabase
+      .from("pharmacy_store_inventory_counts")
+      .insert({
+        store_type: storeType,
+        count_number: "INV-" + Date.now(),
+        count_date: inventoryForm.count_date,
+        count_type: inventoryForm.count_type,
+        count_status: "Draft",
+        counted_by: user?.id || null,
+        notes: inventoryForm.notes.trim() || null,
+      })
+      .select()
+      .single();
+
+    if (countError) {
+      notify("Inventory count could not be saved: " + countError.message, "error");
+      setSaving(false);
+      return;
+    }
+
+    const { error: linesError } = await supabase
+      .from("pharmacy_store_inventory_count_items")
+      .insert(linePayloads.map((line) => ({ ...line, inventory_count_id: count.id })));
+
+    if (linesError) {
+      notify("Count " + count.count_number + " was created as Draft, but its lines failed to save: " +
+        linesError.message + ". Check this draft before creating another count.", "error");
+      await loadStoreData();
+      setSaving(false);
+      return;
+    }
+
+    notify("Inventory count " + count.count_number + " saved as Draft with " + linePayloads.length + " line(s).");
+    setInventoryForm({
+      count_date: new Date().toISOString().slice(0, 10),
+      count_type: "Periodic",
+      notes: "",
+    });
+    setInventoryDraftLines([
+      { balance_index: "", physical_quantity: "", variance_reason: "", notes: "" },
+    ]);
+    await loadStoreData();
+    setSaving(false);
+  }
+
+  async function submitInventoryCount(count) {
+    if (saving) return;
+    if (!window.confirm("Submit " + count.count_number + " for review?")) return;
+    setSaving(true);
+    const { data, error } = await supabase.rpc("submit_pharmacy_store_inventory_count", {
+      p_count_id: Number(count.id),
+    });
+    if (error) notify("Inventory submission failed: " + error.message, "error");
+    else {
+      notify(typeof data === "string" ? data : "Inventory count submitted for review.");
       await loadStoreData();
     }
     setSaving(false);
@@ -1504,7 +1639,192 @@ export default function PharmacyStoreManagement({ user }) {
           </div>
         )}
 
-        {!["entries", "entries-list", "bin-card", "stock-status", "waste-record", "waste-view"].includes(section) && (
+        {section === "inventory" && (
+          <div>
+            <h4>{currentStore?.label} — Physical Inventory Count</h4>
+            <p style={{ color: "#64748b" }}>
+              Record physical quantities against the exact batch or asset. Variance is calculated automatically.
+              Saving creates a Draft; submission sends it for review. Stock changes only after an authorized approval.
+            </p>
+
+            <form onSubmit={saveInventoryCount} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, marginBottom: 22 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                <div>
+                  <label style={labelStyle}>Count Date *</label>
+                  <input required type="date" style={inputStyle} value={inventoryForm.count_date}
+                    onChange={(e) => setInventoryForm((old) => ({ ...old, count_date: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Count Type *</label>
+                  <select required style={inputStyle} value={inventoryForm.count_type}
+                    onChange={(e) => setInventoryForm((old) => ({ ...old, count_type: e.target.value }))}>
+                    {["Periodic", "Annual", "Spot Check", "Expiry Check"].map((type) => (
+                      <option key={type} value={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={labelStyle}>General Notes</label>
+                  <textarea rows="2" style={inputStyle} value={inventoryForm.notes}
+                    onChange={(e) => setInventoryForm((old) => ({ ...old, notes: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, margin: "18px 0 10px" }}>
+                <strong>Counted Stock Lines</strong>
+                <button type="button" onClick={addInventoryLine} style={{ ...primaryButton, background: "#0f766e", padding: "8px 12px" }}>+ Add Item Line</button>
+              </div>
+
+              {inventoryDraftLines.map((line, index) => {
+                const balance = line.balance_index !== "" ? inventoryBalances[Number(line.balance_index)] : null;
+                const variance = balance && line.physical_quantity !== ""
+                  ? Number(line.physical_quantity) - Number(balance.stock_quantity || 0) : null;
+                return (
+                  <div key={index} style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, marginBottom: 10, background: "white" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <strong>Line {index + 1}</strong>
+                      {inventoryDraftLines.length > 1 && (
+                        <button type="button" onClick={() => removeInventoryLine(index)}
+                          style={{ border: 0, background: "#fee2e2", color: "#991b1b", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>Remove</button>
+                      )}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 10 }}>
+                      <div>
+                        <label style={labelStyle}>Item / Batch / Asset *</label>
+                        <select required style={inputStyle} value={line.balance_index}
+                          onChange={(e) => updateInventoryLine(index, "balance_index", e.target.value)}>
+                          <option value="">Select stock balance</option>
+                          {inventoryBalances.map((b, balanceIndex) => (
+                            <option key={balanceIndex} value={balanceIndex}>
+                              {b.item_name} ({b.item_code || "No code"}) | {b.batch_number ? "Batch: " + b.batch_number : b.asset_code ? "Asset: " + b.asset_code : b.serial_number ? "Serial: " + b.serial_number : "No batch/asset"} | Qty: {Number(b.stock_quantity || 0).toLocaleString()}
+                            </option>
+                          ))}
+                        </select>
+                        {balance && <small style={{ color: "#64748b" }}>
+                          {balance.expiry_date ? "Expiry: " + balance.expiry_date : ""}
+                          {balance.unit_of_measure ? " | Unit: " + balance.unit_of_measure : ""}
+                        </small>}
+                      </div>
+                      <div>
+                        <label style={labelStyle}>System Quantity</label>
+                        <input readOnly style={{ ...inputStyle, background: "#e2e8f0" }}
+                          value={balance ? Number(balance.stock_quantity || 0).toLocaleString() : ""} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Physical Quantity *</label>
+                        <input required type="number" min="0" step="any" style={inputStyle}
+                          value={line.physical_quantity}
+                          onChange={(e) => updateInventoryLine(index, "physical_quantity", e.target.value)} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Variance</label>
+                        <input readOnly style={{ ...inputStyle, background: "#e2e8f0", fontWeight: 700,
+                          color: variance === null || Math.abs(variance) < 0.000001 ? "#334155" : variance < 0 ? "#b91c1c" : "#15803d" }}
+                          value={variance === null ? "" : variance.toLocaleString()} />
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Variance Reason {variance !== null && Math.abs(variance) > 0.000001 ? "*" : ""}</label>
+                        <select style={inputStyle} value={line.variance_reason}
+                          required={variance !== null && Math.abs(variance) > 0.000001}
+                          onChange={(e) => updateInventoryLine(index, "variance_reason", e.target.value)}>
+                          <option value="">Select reason (if variance)</option>
+                          {["Counting Error", "Unrecorded Issue", "Unrecorded Receipt", "Damage", "Loss", "Data Entry Error", "Other"].map((reason) => (
+                            <option key={reason} value={reason}>{reason}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Line Notes</label>
+                        <input style={inputStyle} value={line.notes}
+                          onChange={(e) => updateInventoryLine(index, "notes", e.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {!inventoryBalances.length && (
+                <p style={{ color: "#b45309", background: "#fffbeb", padding: 10, borderRadius: 7 }}>
+                  No stock balance rows are available for this store yet. Receive and approve stock before starting a batch-level count.
+                </p>
+              )}
+              <button type="submit" disabled={saving || !inventoryBalances.length}
+                style={{ ...primaryButton, marginTop: 8, opacity: saving || !inventoryBalances.length ? 0.6 : 1 }}>
+                {saving ? "Saving..." : "Save Inventory Count as Draft"}
+              </button>
+            </form>
+
+            <h4>Inventory Count History</h4>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 850 }}>
+                <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>
+                  {["Count No.", "Date", "Type", "Lines", "Status", "Action"].map((h) => (
+                    <th key={h} style={{ padding: 10, borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {inventoryCounts.map((count) => {
+                    const lines = inventoryCountItems.filter((line) => Number(line.inventory_count_id) === Number(count.id));
+                    return (
+                      <tr key={count.id}>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{count.count_number}</td>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{count.count_date}</td>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{count.count_type}</td>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{lines.length}</td>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{count.count_status}</td>
+                        <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                          {count.count_status === "Draft" && (
+                            <button type="button" disabled={saving} onClick={() => submitInventoryCount(count)}
+                              style={{ ...primaryButton, padding: "7px 10px" }}>Submit for Review</button>
+                          )}
+                          {count.count_status === "Submitted" && <span style={{ color: "#a16207", fontWeight: 700 }}>Awaiting authorized review</span>}
+                          {count.count_status === "Approved" && <span style={{ color: "#15803d", fontWeight: 700 }}>Completed</span>}
+                          {["Rejected", "Adjusted"].includes(count.count_status) && <span>{count.count_status}</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!inventoryCounts.length && (
+                    <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#64748b" }}>No inventory counts recorded for this store.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {inventoryCounts.some((count) => inventoryCountItems.some((line) => Number(line.inventory_count_id) === Number(count.id))) && (
+              <div style={{ marginTop: 18, overflowX: "auto" }}>
+                <h4>Count Details</h4>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
+                  <thead><tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                    {["Count No.", "Item", "Batch / Asset", "System", "Physical", "Variance", "Reason"].map((h) => (
+                      <th key={h} style={{ padding: 9, borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {inventoryCounts.flatMap((count) => inventoryCountItems
+                      .filter((line) => Number(line.inventory_count_id) === Number(count.id))
+                      .map((line) => {
+                        const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                        return (
+                          <tr key={line.id}>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{count.count_number}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{item?.item_name || "Item #" + line.item_id}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.batch_number || line.asset_code || line.serial_number || "—"}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.system_quantity || 0).toLocaleString()}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.physical_quantity || 0).toLocaleString()}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, color: Number(line.variance) < 0 ? "#b91c1c" : "#15803d" }}>{Number(line.variance || 0).toLocaleString()}</td>
+                            <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.variance_reason || "—"}</td>
+                          </tr>
+                        );
+                      }))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!["entries", "entries-list", "bin-card", "stock-status", "inventory", "waste-record", "waste-view"].includes(section) && (
           <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 9, padding: 18, color: "#475569" }}>
             <strong>{currentStore?.label} — {currentSection?.label}</strong>
             <p style={{ marginBottom: 0 }}>This workflow is next in the implementation sequence. Entries and receipt records are now connected to the database.</p>
