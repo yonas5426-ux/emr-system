@@ -52,6 +52,7 @@ export default function PharmacyStoreManagement({ user }) {
   const [departmentRequestItems, setDepartmentRequestItems] = useState([]);
   const [departmentRequestForm, setDepartmentRequestForm] = useState({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
   const [departmentRequestLines, setDepartmentRequestLines] = useState([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
+  const [approvalDrafts, setApprovalDrafts] = useState({});
   const [rrfRecordItems, setRrfRecordItems] = useState([]);
   const [rrfForm, setRrfForm] = useState({ request_date: new Date().toISOString().slice(0, 10), reporting_period_start: "", reporting_period_end: "", justification: "", notes: "" });
   const [rrfDraftLines, setRrfDraftLines] = useState([{ item_id: "", average_monthly_consumption: "0", stock_on_order: "0", requested_quantity: "0", justification: "", notes: "" }]);
@@ -367,6 +368,54 @@ export default function PharmacyStoreManagement({ user }) {
     setDepartmentRequestForm({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
     setDepartmentRequestLines([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
     await loadStoreData();
+    setSaving(false);
+  }
+
+  async function approveDepartmentRequest(request) {
+    if (saving) return;
+    const lines = departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id));
+    if (!lines.length) {
+      notify("This request has no item lines to approve.", "error");
+      return;
+    }
+    const approvals = [];
+    for (const line of lines) {
+      const raw = approvalDrafts[line.id] ?? String(line.approved_quantity ?? line.requested_quantity ?? 0);
+      const quantity = Number(raw);
+      if (!Number.isFinite(quantity) || quantity < 0 || quantity > Number(line.requested_quantity)) {
+        notify("Enter a valid approved quantity for every item. It cannot exceed the requested quantity.", "error");
+        return;
+      }
+      if (quantity < Number(line.issued_quantity || 0)) {
+        notify("Approved quantity cannot be lower than an amount already issued.", "error");
+        return;
+      }
+      approvals.push({ request_item_id: Number(line.id), approved_quantity: quantity });
+    }
+    const totalApproved = approvals.reduce((sum, line) => sum + line.approved_quantity, 0);
+    const decision = totalApproved === 0 ? "reject" : "approve";
+    const prompt = decision === "reject"
+      ? "Reject request " + request.request_number + "? All item quantities are zero."
+      : "Save approval for " + request.request_number + "? This will not deduct stock.";
+    if (!window.confirm(prompt)) return;
+
+    setSaving(true);
+    setMessage("");
+    const { error } = await supabase.rpc("approve_pharmacy_store_request", {
+      p_request_id: Number(request.id),
+      p_approvals: approvals,
+    });
+    if (error) {
+      notify("Request approval failed: " + error.message, "error");
+    } else {
+      notify("Request " + request.request_number + " approval saved. No stock was deducted.");
+      setApprovalDrafts((old) => {
+        const next = { ...old };
+        lines.forEach((line) => delete next[line.id]);
+        return next;
+      });
+      await loadStoreData();
+    }
     setSaving(false);
   }
 
@@ -2045,6 +2094,46 @@ export default function PharmacyStoreManagement({ user }) {
               {!items.length && <p style={{ color: "#b45309" }}>Register store items before preparing a department request.</p>}
               <button type="submit" disabled={saving || !items.length} style={{ ...primaryButton, marginTop: 8, opacity: saving || !items.length ? 0.6 : 1 }}>{saving ? "Saving..." : "Submit Department Request"}</button>
             </form>
+            <div style={{ marginBottom: 22 }}>
+              <h4>Pending Requests — Review & Approve</h4>
+              <p style={{ color: "#64748b", fontSize: 13 }}>
+                Enter the quantity approved for each item. Enter 0 to reject an individual item.
+                Saving approval changes request status only; it does not deduct stock.
+                Only users with approval permission can complete this action.
+              </p>
+              {departmentRequests.filter((request) => request.request_status === "Pending").map((request) => {
+                const lines = departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id));
+                return (
+                  <div key={request.id} style={{ border: "1px solid #cbd5e1", borderRadius: 9, padding: 14, marginBottom: 12, background: "#fffbeb" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                      <div>
+                        <strong>{request.request_number} — {request.requesting_department}</strong>
+                        <div style={{ color: "#64748b", fontSize: 12 }}>Date: {request.request_date} | Priority: {request.priority}</div>
+                      </div>
+                      <strong style={{ color: "#a16207" }}>Pending</strong>
+                    </div>
+                    {lines.map((line) => {
+                      const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                      const draftValue = approvalDrafts[line.id] ?? String(line.requested_quantity ?? 0);
+                      return (
+                        <div key={line.id} style={{ display: "grid", gridTemplateColumns: "minmax(150px,2fr) repeat(3,minmax(100px,1fr))", gap: 9, alignItems: "end", padding: "9px 0", borderTop: "1px solid #e2e8f0" }}>
+                          <div><strong>{item?.item_name || "Item #" + line.item_id}</strong><div style={{ color: "#64748b", fontSize: 12 }}>{line.item_notes || "No item notes"}</div></div>
+                          <div><label style={labelStyle}>Requested</label><input readOnly style={{ ...inputStyle, background: "#e2e8f0" }} value={Number(line.requested_quantity).toLocaleString() + " " + (line.unit_of_measure || item?.unit_of_measure || "")} /></div>
+                          <div><label style={labelStyle}>Approve Quantity</label><input type="number" min={0} max={Number(line.requested_quantity)} step="any" style={inputStyle} value={draftValue} onChange={(e) => setApprovalDrafts((old) => ({ ...old, [line.id]: e.target.value }))} /></div>
+                          <div><label style={labelStyle}>Unit</label><input readOnly style={{ ...inputStyle, background: "#e2e8f0" }} value={line.unit_of_measure || item?.unit_of_measure || "—"} /></div>
+                        </div>
+                      );
+                    })}
+                    <button type="button" disabled={saving || !lines.length} onClick={() => approveDepartmentRequest(request)} style={{ ...primaryButton, marginTop: 10, opacity: saving || !lines.length ? 0.6 : 1 }}>
+                      {saving ? "Saving..." : "Save Approval Decision"}
+                    </button>
+                  </div>
+                );
+              })}
+              {!departmentRequests.some((request) => request.request_status === "Pending") && (
+                <p style={{ color: "#64748b" }}>There are no Pending requests awaiting approval.</p>
+              )}
+            </div>
             <h4>Department Request History ({departmentRequests.length})</h4>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
