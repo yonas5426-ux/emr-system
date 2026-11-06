@@ -48,6 +48,10 @@ export default function PharmacyStoreManagement({ user }) {
   const [inventoryCountItems, setInventoryCountItems] = useState([]);
   const [inventoryBalances, setInventoryBalances] = useState([]);
   const [rrfRecords, setRrfRecords] = useState([]);
+  const [departmentRequests, setDepartmentRequests] = useState([]);
+  const [departmentRequestItems, setDepartmentRequestItems] = useState([]);
+  const [departmentRequestForm, setDepartmentRequestForm] = useState({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
+  const [departmentRequestLines, setDepartmentRequestLines] = useState([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
   const [rrfRecordItems, setRrfRecordItems] = useState([]);
   const [rrfForm, setRrfForm] = useState({ request_date: new Date().toISOString().slice(0, 10), reporting_period_start: "", reporting_period_end: "", justification: "", notes: "" });
   const [rrfDraftLines, setRrfDraftLines] = useState([{ item_id: "", average_monthly_consumption: "0", stock_on_order: "0", requested_quantity: "0", justification: "", notes: "" }]);
@@ -231,6 +235,25 @@ export default function PharmacyStoreManagement({ user }) {
       }
     }
 
+    const requestResult = await supabase.from("pharmacy_store_requests")
+      .select("*").eq("store_type", storeType).order("created_at", { ascending: false }).limit(100);
+    if (requestResult.error) {
+      setDepartmentRequests([]);
+      setDepartmentRequestItems([]);
+      notify("Department requests could not load: " + requestResult.error.message, "error");
+    } else {
+      const requestRows = requestResult.data || [];
+      setDepartmentRequests(requestRows);
+      if (requestRows.length) {
+        const requestItemResult = await supabase.from("pharmacy_store_request_items")
+          .select("*").in("request_id", requestRows.map((row) => row.id));
+        if (requestItemResult.error) {
+          setDepartmentRequestItems([]);
+          notify("Department request item details could not load: " + requestItemResult.error.message, "error");
+        } else setDepartmentRequestItems(requestItemResult.data || []);
+      } else setDepartmentRequestItems([]);
+    }
+
     const rrfResult = await supabase.from("pharmacy_store_rrf")
       .select("*").eq("store_type", storeType).order("created_at", { ascending: false }).limit(100);
     if (rrfResult.error) {
@@ -278,6 +301,73 @@ export default function PharmacyStoreManagement({ user }) {
 
   function removeReceiptLine(index) {
     setReceiptItems((old) => old.filter((_, i) => i !== index));
+  }
+
+  function updateDepartmentRequestLine(index, field, value) {
+    setDepartmentRequestLines((old) => old.map((line, i) => i === index ? { ...line, [field]: value } : line));
+  }
+
+  function addDepartmentRequestLine() {
+    setDepartmentRequestLines((old) => [...old, { item_id: "", requested_quantity: "1", item_notes: "" }]);
+  }
+
+  function removeDepartmentRequestLine(index) {
+    setDepartmentRequestLines((old) => old.filter((_, i) => i !== index));
+  }
+
+  async function saveDepartmentRequest(event) {
+    event.preventDefault();
+    if (saving) return;
+    const department = departmentRequestForm.requesting_department.trim();
+    if (!department) { notify("Enter the requesting department.", "error"); return; }
+    if (!departmentRequestLines.length) { notify("Add at least one requested item.", "error"); return; }
+    const seen = new Set();
+    const linePayloads = [];
+    for (let i = 0; i < departmentRequestLines.length; i++) {
+      const line = departmentRequestLines[i];
+      const item = items.find((row) => String(row.id) === String(line.item_id));
+      const quantity = Number(line.requested_quantity);
+      if (!item) { notify("Select an item on request line " + (i + 1) + ".", "error"); return; }
+      if (seen.has(String(item.id))) { notify("Do not add the same item more than once to one request.", "error"); return; }
+      seen.add(String(item.id));
+      if (!Number.isFinite(quantity) || quantity <= 0) { notify("Enter a requested quantity greater than zero on line " + (i + 1) + ".", "error"); return; }
+      linePayloads.push({ item_id: Number(item.id), requested_quantity: quantity, approved_quantity: 0, issued_quantity: 0, unit_of_measure: item.unit_of_measure, item_notes: line.item_notes.trim() || null });
+    }
+    setSaving(true);
+    setMessage("");
+    const requestNumber = "REQ-" + Date.now();
+    const { data: header, error: headerError } = await supabase.from("pharmacy_store_requests")
+      .insert({
+        store_type: storeType, request_number: requestNumber,
+        requesting_department: department, requested_by: user?.id || null,
+        request_date: departmentRequestForm.request_date,
+        priority: departmentRequestForm.priority,
+        request_reason: departmentRequestForm.request_reason.trim() || null,
+        request_status: "Draft",
+        notes: departmentRequestForm.notes.trim() || null,
+      }).select().single();
+    if (headerError) {
+      notify("Department request could not be saved: " + headerError.message, "error");
+      setSaving(false); return;
+    }
+    const { error: linesError } = await supabase.from("pharmacy_store_request_items")
+      .insert(linePayloads.map((line) => ({ ...line, request_id: header.id })));
+    if (linesError) {
+      notify("Request " + requestNumber + " was saved as Draft, but item lines failed: " + linesError.message + ". Check this draft before creating another.", "error");
+      await loadStoreData();
+      setSaving(false); return;
+    }
+    const { error: submitError } = await supabase.from("pharmacy_store_requests")
+      .update({ request_status: "Pending" }).eq("id", header.id);
+    if (submitError) {
+      notify("Request items saved, but status could not be submitted: " + submitError.message + ". The request remains Draft.", "error");
+    } else {
+      notify("Department request " + requestNumber + " submitted as Pending. No stock was deducted.");
+    }
+    setDepartmentRequestForm({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
+    setDepartmentRequestLines([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
+    await loadStoreData();
+    setSaving(false);
   }
 
   function updateRrfLine(index, field, value) {
@@ -1923,6 +2013,72 @@ export default function PharmacyStoreManagement({ user }) {
         )}
 
 
+        {section === "requests" && (
+          <div>
+            <h4>{currentStore?.label} — Department Stock Request</h4>
+            <p style={{ color: "#64748b" }}>Submit a department request for store items. New requests are saved as Pending after all item lines are recorded. Saving a request does not deduct stock or create an issue.</p>
+            <form onSubmit={saveDepartmentRequest} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, marginBottom: 22 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                <div><label style={labelStyle}>Requesting Department *</label><input required style={inputStyle} value={departmentRequestForm.requesting_department} onChange={(e) => setDepartmentRequestForm((old) => ({ ...old, requesting_department: e.target.value }))} placeholder="Enter department name" /></div>
+                <div><label style={labelStyle}>Request Date *</label><input required type="date" style={inputStyle} value={departmentRequestForm.request_date} onChange={(e) => setDepartmentRequestForm((old) => ({ ...old, request_date: e.target.value }))} /></div>
+                <div><label style={labelStyle}>Priority *</label><select required style={inputStyle} value={departmentRequestForm.priority} onChange={(e) => setDepartmentRequestForm((old) => ({ ...old, priority: e.target.value }))}>{["Low", "Normal", "High", "Urgent"].map((v) => <option key={v} value={v}>{v}</option>)}</select></div>
+                <div style={{ gridColumn: "1 / -1" }}><label style={labelStyle}>Request Reason</label><textarea rows="2" style={inputStyle} value={departmentRequestForm.request_reason} onChange={(e) => setDepartmentRequestForm((old) => ({ ...old, request_reason: e.target.value }))} /></div>
+                <div style={{ gridColumn: "1 / -1" }}><label style={labelStyle}>Notes</label><textarea rows="2" style={inputStyle} value={departmentRequestForm.notes} onChange={(e) => setDepartmentRequestForm((old) => ({ ...old, notes: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, margin: "18px 0 10px" }}>
+                <strong>Requested Items</strong>
+                <button type="button" onClick={addDepartmentRequestLine} style={{ ...primaryButton, background: "#0f766e", padding: "8px 12px" }}>+ Add Item</button>
+              </div>
+              {departmentRequestLines.map((line, index) => {
+                const item = items.find((row) => String(row.id) === String(line.item_id));
+                const available = item ? inventoryBalances.filter((b) => Number(b.item_id) === Number(item.id)).reduce((sum, b) => sum + Number(b.stock_quantity || 0), 0) : null;
+                return <div key={index} style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}><strong>Request Item {index + 1}</strong>{departmentRequestLines.length > 1 && <button type="button" onClick={() => removeDepartmentRequestLine(index)} style={{ border: 0, background: "#fee2e2", color: "#991b1b", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>Remove</button>}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+                    <div><label style={labelStyle}>Store Item *</label><select required style={inputStyle} value={line.item_id} onChange={(e) => updateDepartmentRequestLine(index, "item_id", e.target.value)}><option value="">Select item</option>{items.map((row) => <option key={row.id} value={row.id}>{row.item_name} ({row.item_code || "No code"})</option>)}</select></div>
+                    <div><label style={labelStyle}>Available Stock</label><input readOnly style={{ ...inputStyle, background: "#e2e8f0" }} value={available === null ? "Select item" : available.toLocaleString() + " " + (item?.unit_of_measure || "")} /></div>
+                    <div><label style={labelStyle}>Requested Quantity *</label><input required type="number" min="0.000001" step="any" style={inputStyle} value={line.requested_quantity} onChange={(e) => updateDepartmentRequestLine(index, "requested_quantity", e.target.value)} /></div>
+                    <div><label style={labelStyle}>Item Notes</label><input style={inputStyle} value={line.item_notes} onChange={(e) => updateDepartmentRequestLine(index, "item_notes", e.target.value)} /></div>
+                  </div>
+                </div>;
+              })}
+              {!items.length && <p style={{ color: "#b45309" }}>Register store items before preparing a department request.</p>}
+              <button type="submit" disabled={saving || !items.length} style={{ ...primaryButton, marginTop: 8, opacity: saving || !items.length ? 0.6 : 1 }}>{saving ? "Saving..." : "Submit Department Request"}</button>
+            </form>
+            <h4>Department Request History ({departmentRequests.length})</h4>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
+                <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>{["Request No.", "Date", "Department", "Priority", "Items", "Status", "Requested By"].map((h) => <th key={h} style={{ padding: 10, borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {departmentRequests.map((request) => {
+                    const lines = departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id));
+                    return <tr key={request.id}>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{request.request_number}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.request_date}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.requesting_department}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.priority}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{lines.length}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700, color: request.request_status === "Pending" ? "#a16207" : "#334155" }}>{request.request_status}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.requested_by || "—"}</td>
+                    </tr>;
+                  })}
+                  {!departmentRequests.length && <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "#64748b" }}>No department requests found for this store.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {departmentRequestItems.length > 0 && <div style={{ marginTop: 18, overflowX: "auto" }}>
+              <h4>Department Request Item Details</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 850 }}>
+                <thead><tr style={{ background: "#f1f5f9", textAlign: "left" }}>{["Request No.", "Department", "Item", "Requested", "Approved", "Issued", "Unit", "Notes"].map((h) => <th key={h} style={{ padding: 9, borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr></thead>
+                <tbody>{departmentRequests.flatMap((request) => departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id)).map((line) => {
+                  const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                  return <tr key={line.id}><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.request_number}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request.requesting_department}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{item?.item_name || "Item #" + line.item_id}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.requested_quantity).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.approved_quantity || 0).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.issued_quantity || 0).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.unit_of_measure || item?.unit_of_measure || "—"}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.item_notes || "—"}</td></tr>;
+                }))}</tbody>
+              </table>
+            </div>}
+          </div>
+        )}
+
         {section === "rrf" && (
           <div>
             <h4>{currentStore?.label} — Requisition and Report Form (RRF)</h4>
@@ -1996,7 +2152,7 @@ export default function PharmacyStoreManagement({ user }) {
           </div>
         )}
 
-        {!["entries", "entries-list", "bin-card", "stock-status", "inventory", "rrf", "waste-record", "waste-view"].includes(section) && (
+        {!["entries", "entries-list", "requests", "bin-card", "stock-status", "inventory", "rrf", "waste-record", "waste-view"].includes(section) && (
           <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 9, padding: 18, color: "#475569" }}>
             <strong>{currentStore?.label} — {currentSection?.label}</strong>
             <p style={{ marginBottom: 0 }}>This workflow is next in the implementation sequence. Entries and receipt records are now connected to the database.</p>
