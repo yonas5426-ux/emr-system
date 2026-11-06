@@ -47,6 +47,10 @@ export default function PharmacyStoreManagement({ user }) {
   const [inventoryCounts, setInventoryCounts] = useState([]);
   const [inventoryCountItems, setInventoryCountItems] = useState([]);
   const [inventoryBalances, setInventoryBalances] = useState([]);
+  const [rrfRecords, setRrfRecords] = useState([]);
+  const [rrfRecordItems, setRrfRecordItems] = useState([]);
+  const [rrfForm, setRrfForm] = useState({ request_date: new Date().toISOString().slice(0, 10), reporting_period_start: "", reporting_period_end: "", justification: "", notes: "" });
+  const [rrfDraftLines, setRrfDraftLines] = useState([{ item_id: "", average_monthly_consumption: "0", stock_on_order: "0", requested_quantity: "0", justification: "", notes: "" }]);
   const [inventoryForm, setInventoryForm] = useState({
     count_date: new Date().toISOString().slice(0, 10),
     count_type: "Periodic",
@@ -227,6 +231,25 @@ export default function PharmacyStoreManagement({ user }) {
       }
     }
 
+    const rrfResult = await supabase.from("pharmacy_store_rrf")
+      .select("*").eq("store_type", storeType).order("created_at", { ascending: false }).limit(100);
+    if (rrfResult.error) {
+      setRrfRecords([]);
+      setRrfRecordItems([]);
+      notify("RRF records could not load: " + rrfResult.error.message, "error");
+    } else {
+      const rows = rrfResult.data || [];
+      setRrfRecords(rows);
+      if (rows.length) {
+        const rrfItemResult = await supabase.from("pharmacy_store_rrf_items")
+          .select("*").in("rrf_id", rows.map((row) => row.id));
+        if (rrfItemResult.error) {
+          setRrfRecordItems([]);
+          notify("RRF item details could not load: " + rrfItemResult.error.message, "error");
+        } else setRrfRecordItems(rrfItemResult.data || []);
+      } else setRrfRecordItems([]);
+    }
+
     setLoading(false);
   }
 
@@ -255,6 +278,81 @@ export default function PharmacyStoreManagement({ user }) {
 
   function removeReceiptLine(index) {
     setReceiptItems((old) => old.filter((_, i) => i !== index));
+  }
+
+  function updateRrfLine(index, field, value) {
+    setRrfDraftLines((old) => old.map((line, i) => i === index ? { ...line, [field]: value } : line));
+  }
+
+  function addRrfLine() {
+    setRrfDraftLines((old) => [...old, { item_id: "", average_monthly_consumption: "0", stock_on_order: "0", requested_quantity: "0", justification: "", notes: "" }]);
+  }
+
+  function removeRrfLine(index) {
+    setRrfDraftLines((old) => old.filter((_, i) => i !== index));
+  }
+
+  async function saveRrfDraft(event) {
+    event.preventDefault();
+    if (saving) return;
+    if (!rrfDraftLines.length) { notify("Add at least one item to the RRF.", "error"); return; }
+    if (rrfForm.reporting_period_start && rrfForm.reporting_period_end && rrfForm.reporting_period_end < rrfForm.reporting_period_start) {
+      notify("Reporting period end date must not be earlier than start date.", "error"); return;
+    }
+    const seen = new Set();
+    const payloads = [];
+    for (let i = 0; i < rrfDraftLines.length; i++) {
+      const line = rrfDraftLines[i];
+      const item = items.find((row) => String(row.id) === String(line.item_id));
+      const amc = Number(line.average_monthly_consumption);
+      const onOrder = Number(line.stock_on_order);
+      const requested = Number(line.requested_quantity);
+      if (!item) { notify("Select an item on RRF line " + (i + 1) + ".", "error"); return; }
+      if (seen.has(String(item.id))) { notify("Do not add the same item more than once to one RRF.", "error"); return; }
+      seen.add(String(item.id));
+      if (![amc, onOrder, requested].every(Number.isFinite) || amc < 0 || onOrder < 0 || requested < 0 || requested === 0) {
+        notify("Enter valid non-negative consumption and stock-on-order values, and a requested quantity greater than zero, on line " + (i + 1) + ".", "error"); return;
+      }
+      const stockOnHand = inventoryBalances.filter((b) => Number(b.item_id) === Number(item.id))
+        .reduce((sum, b) => sum + Number(b.stock_quantity || 0), 0);
+      payloads.push({
+        item_id: Number(item.id), average_monthly_consumption: amc,
+        stock_on_hand: stockOnHand, stock_on_order: onOrder,
+        months_of_stock: amc > 0 ? Number((stockOnHand / amc).toFixed(2)) : null,
+        requested_quantity: requested, approved_quantity: 0,
+        unit_of_measure: item.unit_of_measure,
+        justification: line.justification.trim() || null, notes: line.notes.trim() || null,
+      });
+    }
+    setSaving(true);
+    setMessage("");
+    const rrfNumber = "RRF-" + Date.now();
+    const { data: header, error: headerError } = await supabase.from("pharmacy_store_rrf")
+      .insert({
+        store_type: storeType, rrf_number: rrfNumber,
+        request_date: rrfForm.request_date,
+        reporting_period_start: rrfForm.reporting_period_start || null,
+        reporting_period_end: rrfForm.reporting_period_end || null,
+        rrf_status: "Draft", requested_by: user?.id || null,
+        justification: rrfForm.justification.trim() || null,
+        notes: rrfForm.notes.trim() || null,
+      }).select().single();
+    if (headerError) {
+      notify("RRF could not be saved: " + headerError.message, "error");
+      setSaving(false); return;
+    }
+    const { error: linesError } = await supabase.from("pharmacy_store_rrf_items")
+      .insert(payloads.map((line) => ({ ...line, rrf_id: header.id })));
+    if (linesError) {
+      notify("RRF " + rrfNumber + " header was saved as Draft, but item lines failed: " + linesError.message + ". Check this draft before creating another.", "error");
+      await loadStoreData();
+      setSaving(false); return;
+    }
+    notify("RRF " + rrfNumber + " saved as Draft with " + payloads.length + " item line(s). No stock movement was created.");
+    setRrfForm({ request_date: new Date().toISOString().slice(0, 10), reporting_period_start: "", reporting_period_end: "", justification: "", notes: "" });
+    setRrfDraftLines([{ item_id: "", average_monthly_consumption: "0", stock_on_order: "0", requested_quantity: "0", justification: "", notes: "" }]);
+    await loadStoreData();
+    setSaving(false);
   }
 
   function updateItem(field, value) {
@@ -1824,7 +1922,81 @@ export default function PharmacyStoreManagement({ user }) {
           </div>
         )}
 
-        {!["entries", "entries-list", "bin-card", "stock-status", "inventory", "waste-record", "waste-view"].includes(section) && (
+
+        {section === "rrf" && (
+          <div>
+            <h4>{currentStore?.label} — Requisition and Report Form (RRF)</h4>
+            <p style={{ color: "#64748b" }}>Prepare a store requisition using current stock balances and average monthly consumption. Saving creates a Draft only; it does not change stock.</p>
+            <form onSubmit={saveRrfDraft} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, marginBottom: 22 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))", gap: 12 }}>
+                <div><label style={labelStyle}>Request Date *</label><input required type="date" style={inputStyle} value={rrfForm.request_date} onChange={(e) => setRrfForm((old) => ({ ...old, request_date: e.target.value }))} /></div>
+                <div><label style={labelStyle}>Reporting Period Start</label><input type="date" style={inputStyle} value={rrfForm.reporting_period_start} onChange={(e) => setRrfForm((old) => ({ ...old, reporting_period_start: e.target.value }))} /></div>
+                <div><label style={labelStyle}>Reporting Period End</label><input type="date" style={inputStyle} value={rrfForm.reporting_period_end} onChange={(e) => setRrfForm((old) => ({ ...old, reporting_period_end: e.target.value }))} /></div>
+                <div style={{ gridColumn: "1 / -1" }}><label style={labelStyle}>General Justification</label><textarea rows="2" style={inputStyle} value={rrfForm.justification} onChange={(e) => setRrfForm((old) => ({ ...old, justification: e.target.value }))} /></div>
+                <div style={{ gridColumn: "1 / -1" }}><label style={labelStyle}>Notes</label><textarea rows="2" style={inputStyle} value={rrfForm.notes} onChange={(e) => setRrfForm((old) => ({ ...old, notes: e.target.value }))} /></div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, margin: "18px 0 10px" }}>
+                <strong>Requested Items</strong>
+                <button type="button" onClick={addRrfLine} style={{ ...primaryButton, background: "#0f766e", padding: "8px 12px" }}>+ Add Item</button>
+              </div>
+              {rrfDraftLines.map((line, index) => {
+                const item = items.find((row) => String(row.id) === String(line.item_id));
+                const onHand = item ? inventoryBalances.filter((b) => Number(b.item_id) === Number(item.id)).reduce((sum, b) => sum + Number(b.stock_quantity || 0), 0) : 0;
+                const amc = Number(line.average_monthly_consumption || 0);
+                const mos = item && amc > 0 ? (onHand / amc).toFixed(2) : "—";
+                return (
+                  <div key={index} style={{ background: "#fff", border: "1px solid #cbd5e1", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}><strong>Item Line {index + 1}</strong>{rrfDraftLines.length > 1 && <button type="button" onClick={() => removeRrfLine(index)} style={{ border: 0, background: "#fee2e2", color: "#991b1b", borderRadius: 6, padding: "6px 10px", cursor: "pointer" }}>Remove</button>}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+                      <div><label style={labelStyle}>Store Item *</label><select required style={inputStyle} value={line.item_id} onChange={(e) => updateRrfLine(index, "item_id", e.target.value)}><option value="">Select item</option>{items.map((row) => <option key={row.id} value={row.id}>{row.item_name} ({row.item_code || "No code"})</option>)}</select></div>
+                      <div><label style={labelStyle}>Average Monthly Consumption *</label><input required type="number" min="0" step="any" style={inputStyle} value={line.average_monthly_consumption} onChange={(e) => updateRrfLine(index, "average_monthly_consumption", e.target.value)} /></div>
+                      <div><label style={labelStyle}>Stock on Hand</label><input readOnly style={{ ...inputStyle, background: "#e2e8f0" }} value={item ? onHand.toLocaleString() + " " + item.unit_of_measure : "Select item"} /></div>
+                      <div><label style={labelStyle}>Stock on Order *</label><input required type="number" min="0" step="any" style={inputStyle} value={line.stock_on_order} onChange={(e) => updateRrfLine(index, "stock_on_order", e.target.value)} /></div>
+                      <div><label style={labelStyle}>Months of Stock</label><input readOnly style={{ ...inputStyle, background: "#e2e8f0" }} value={mos} /></div>
+                      <div><label style={labelStyle}>Requested Quantity *</label><input required type="number" min="0.000001" step="any" style={inputStyle} value={line.requested_quantity} onChange={(e) => updateRrfLine(index, "requested_quantity", e.target.value)} /></div>
+                      <div><label style={labelStyle}>Line Justification</label><input style={inputStyle} value={line.justification} onChange={(e) => updateRrfLine(index, "justification", e.target.value)} /></div>
+                      <div><label style={labelStyle}>Line Notes</label><input style={inputStyle} value={line.notes} onChange={(e) => updateRrfLine(index, "notes", e.target.value)} /></div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!items.length && <p style={{ color: "#b45309" }}>Register store items before preparing an RRF.</p>}
+              <button type="submit" disabled={saving || !items.length} style={{ ...primaryButton, marginTop: 8, opacity: saving || !items.length ? 0.6 : 1 }}>{saving ? "Saving..." : "Save RRF as Draft"}</button>
+            </form>
+            <h4>RRF History ({rrfRecords.length})</h4>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
+                <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>{["RRF No.", "Date", "Reporting Period", "Items", "Status", "Requested By"].map((h) => <th key={h} style={{ padding: 10, borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {rrfRecords.map((record) => {
+                    const lines = rrfRecordItems.filter((line) => Number(line.rrf_id) === Number(record.id));
+                    return <tr key={record.id}>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{record.rrf_number}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{record.request_date}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{record.reporting_period_start || "—"} – {record.reporting_period_end || "—"}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{lines.length}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{record.rrf_status}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{record.requested_by || "—"}</td>
+                    </tr>;
+                  })}
+                  {!rrfRecords.length && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#64748b" }}>No RRF records found for this store.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {rrfRecordItems.length > 0 && <div style={{ marginTop: 18, overflowX: "auto" }}>
+              <h4>RRF Item Details</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 950 }}>
+                <thead><tr style={{ background: "#f1f5f9", textAlign: "left" }}>{["RRF No.", "Item", "AMC", "On Hand", "On Order", "Months", "Requested", "Approved"].map((h) => <th key={h} style={{ padding: 9, borderBottom: "1px solid #cbd5e1" }}>{h}</th>)}</tr></thead>
+                <tbody>{rrfRecords.flatMap((record) => rrfRecordItems.filter((line) => Number(line.rrf_id) === Number(record.id)).map((line) => {
+                  const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                  return <tr key={line.id}><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{record.rrf_number}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{item?.item_name || "Item #" + line.item_id}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.average_monthly_consumption).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.stock_on_hand).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.stock_on_order).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{line.months_of_stock == null ? "—" : Number(line.months_of_stock).toFixed(2)}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.requested_quantity).toLocaleString()}</td><td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>{Number(line.approved_quantity).toLocaleString()}</td></tr>;
+                }))}</tbody>
+              </table>
+            </div>}
+          </div>
+        )}
+
+        {!["entries", "entries-list", "bin-card", "stock-status", "inventory", "rrf", "waste-record", "waste-view"].includes(section) && (
           <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 9, padding: 18, color: "#475569" }}>
             <strong>{currentStore?.label} — {currentSection?.label}</strong>
             <p style={{ marginBottom: 0 }}>This workflow is next in the implementation sequence. Entries and receipt records are now connected to the database.</p>
