@@ -50,6 +50,8 @@ export default function PharmacyStoreManagement({ user }) {
   const [rrfRecords, setRrfRecords] = useState([]);
   const [departmentRequests, setDepartmentRequests] = useState([]);
   const [departmentRequestItems, setDepartmentRequestItems] = useState([]);
+  const [issueRecords, setIssueRecords] = useState([]);
+  const [issueRecordItems, setIssueRecordItems] = useState([]);
   const [departmentRequestForm, setDepartmentRequestForm] = useState({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
   const [departmentRequestLines, setDepartmentRequestLines] = useState([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
   const [approvalDrafts, setApprovalDrafts] = useState({});
@@ -236,6 +238,25 @@ export default function PharmacyStoreManagement({ user }) {
       }
     }
 
+    const issueResult = await supabase.from("pharmacy_store_issues")
+      .select("*").eq("store_type", storeType).order("created_at", { ascending: false }).limit(100);
+    if (issueResult.error) {
+      setIssueRecords([]);
+      setIssueRecordItems([]);
+      notify("Issue records could not load: " + issueResult.error.message, "error");
+    } else {
+      const issueRows = issueResult.data || [];
+      setIssueRecords(issueRows);
+      if (issueRows.length) {
+        const issueItemResult = await supabase.from("pharmacy_store_issue_items")
+          .select("*").in("issue_id", issueRows.map((row) => row.id));
+        if (issueItemResult.error) {
+          setIssueRecordItems([]);
+          notify("Issue item details could not load: " + issueItemResult.error.message, "error");
+        } else setIssueRecordItems(issueItemResult.data || []);
+      } else setIssueRecordItems([]);
+    }
+
     const requestResult = await supabase.from("pharmacy_store_requests")
       .select("*").eq("store_type", storeType).order("created_at", { ascending: false }).limit(100);
     if (requestResult.error) {
@@ -368,6 +389,100 @@ export default function PharmacyStoreManagement({ user }) {
     setDepartmentRequestForm({ requesting_department: "", request_date: new Date().toISOString().slice(0, 10), priority: "Normal", request_reason: "", notes: "" });
     setDepartmentRequestLines([{ item_id: "", requested_quantity: "1", item_notes: "" }]);
     await loadStoreData();
+    setSaving(false);
+  }
+
+  async function prepareDepartmentIssue(request) {
+    if (saving) return;
+    if (!["Medical", "Supply"].includes(storeType)) {
+      notify("Issue processing is supported for Medical and Supply stores only.", "error");
+      return;
+    }
+    const requestLines = departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id));
+    const remainingLines = requestLines.map((line) => ({
+      ...line,
+      remaining_quantity: Number(line.approved_quantity || 0) - Number(line.issued_quantity || 0),
+    })).filter((line) => line.remaining_quantity > 0);
+    if (!remainingLines.length) {
+      notify("This request has no approved quantity remaining to issue.", "error");
+      return;
+    }
+    const existingDraft = issueRecords.find((issue) =>
+      Number(issue.request_id) === Number(request.id) && issue.issue_status === "Draft"
+    );
+    if (existingDraft) {
+      notify("A Draft issue already exists for this request: " + existingDraft.issue_number + ". Review it in Issued List.", "error");
+      return;
+    }
+    if (!window.confirm("Prepare a Draft issue for " + request.request_number + "? This will not deduct stock.")) return;
+
+    setSaving(true);
+    setMessage("");
+    const issueNumber = "ISS-" + Date.now();
+    const { data: issue, error: issueError } = await supabase.from("pharmacy_store_issues")
+      .insert({
+        store_type: storeType,
+        issue_number: issueNumber,
+        request_id: Number(request.id),
+        issuing_department: request.requesting_department,
+        issued_to: request.requested_by || null,
+        issue_status: "Draft",
+        issued_by: user?.id || null,
+        notes: "Prepared from approved department request " + request.request_number,
+      }).select().single();
+    if (issueError) {
+      notify("Draft issue could not be created: " + issueError.message, "error");
+      setSaving(false);
+      return;
+    }
+
+    const linePayloads = remainingLines.map((line) => ({
+      issue_id: issue.id,
+      item_id: Number(line.item_id),
+      issued_quantity: line.remaining_quantity,
+      received_quantity: 0,
+      unit_of_measure: line.unit_of_measure || items.find((item) => Number(item.id) === Number(line.item_id))?.unit_of_measure || "",
+      unit_cost: 0,
+    }));
+    const { error: linesError } = await supabase.from("pharmacy_store_issue_items").insert(linePayloads);
+    if (linesError) {
+      const { error: cleanupError } = await supabase.from("pharmacy_store_issues").delete().eq("id", issue.id);
+      notify("Draft issue item lines failed: " + linesError.message +
+        (cleanupError ? ". The empty issue header could not be removed; check " + issueNumber + " before retrying." : ". The empty Draft header was removed."), "error");
+      await loadStoreData();
+      setSaving(false);
+      return;
+    }
+
+    notify("Draft issue " + issueNumber + " prepared. No stock has been deducted.");
+    await loadStoreData();
+    setSection("issued");
+    setSaving(false);
+  }
+
+  async function confirmDepartmentIssue(issue) {
+    if (saving) return;
+    if (!["Medical", "Supply"].includes(issue.store_type)) {
+      notify("The database issue function supports Medical and Supply stores only.", "error");
+      return;
+    }
+    if (issue.issue_status !== "Draft") {
+      notify("Only Draft issues can be confirmed.", "error");
+      return;
+    }
+    if (!window.confirm("Confirm " + issue.issue_number + " and deduct stock? The database will allocate available batches using FEFO/FIFO. This action cannot be reversed from this screen.")) return;
+
+    setSaving(true);
+    setMessage("");
+    const { error } = await supabase.rpc("issue_pharmacy_store_request", {
+      p_issue_id: Number(issue.id),
+    });
+    if (error) {
+      notify("Stock issue failed: " + error.message, "error");
+    } else {
+      notify("Issue " + issue.issue_number + " completed. Stock movements were recorded by the database.");
+      await loadStoreData();
+    }
     setSaving(false);
   }
 
@@ -2168,6 +2283,121 @@ export default function PharmacyStoreManagement({ user }) {
           </div>
         )}
 
+        {section === "issued" && (
+          <div>
+            <h4>{currentStore?.label} — Issue Preparation & Issued List</h4>
+            <p style={{ color: "#64748b" }}>
+              Only approved quantities that have not yet been issued are eligible.
+              Preparing a Draft does not change stock. Stock is deducted only after an authorized user confirms the issue.
+            </p>
+            <h4>Approved Requests Ready for Issue</h4>
+            {departmentRequests.filter((request) =>
+              ["Approved", "Partially Approved"].includes(request.request_status) &&
+              departmentRequestItems.some((line) => Number(line.request_id) === Number(request.id) &&
+                Number(line.approved_quantity || 0) > Number(line.issued_quantity || 0))
+            ).map((request) => {
+              const lines = departmentRequestItems.filter((line) => Number(line.request_id) === Number(request.id));
+              const remainingTotal = lines.reduce((sum, line) =>
+                sum + Math.max(0, Number(line.approved_quantity || 0) - Number(line.issued_quantity || 0)), 0);
+              const hasDraft = issueRecords.some((issue) =>
+                Number(issue.request_id) === Number(request.id) && issue.issue_status === "Draft");
+              return (
+                <div key={request.id} style={{ border: "1px solid #cbd5e1", borderRadius: 9, padding: 14, marginBottom: 12, background: "#f8fafc" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <strong>{request.request_number} — {request.requesting_department}</strong>
+                      <div style={{ color: "#64748b", fontSize: 12 }}>
+                        Priority: {request.priority} | Remaining approved quantity: {remainingTotal.toLocaleString()}
+                      </div>
+                    </div>
+                    <strong>{request.request_status}</strong>
+                  </div>
+                  <div style={{ overflowX: "auto", marginTop: 10 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                      <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>
+                        {["Item", "Approved", "Issued", "Remaining", "Unit"].map((heading) => <th key={heading} style={{ padding: 8, borderBottom: "1px solid #cbd5e1" }}>{heading}</th>)}
+                      </tr></thead>
+                      <tbody>{lines.filter((line) => Number(line.approved_quantity || 0) > Number(line.issued_quantity || 0)).map((line) => {
+                        const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                        return <tr key={line.id}>
+                          <td style={{ padding: 8, borderBottom: "1px solid #e2e8f0" }}>{item?.item_name || "Item #" + line.item_id}</td>
+                          <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid #e2e8f0" }}>{Number(line.approved_quantity || 0).toLocaleString()}</td>
+                          <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid #e2e8f0" }}>{Number(line.issued_quantity || 0).toLocaleString()}</td>
+                          <td style={{ padding: 8, textAlign: "right", borderBottom: "1px solid #e2e8f0" }}>{(Number(line.approved_quantity || 0) - Number(line.issued_quantity || 0)).toLocaleString()}</td>
+                          <td style={{ padding: 8, borderBottom: "1px solid #e2e8f0" }}>{line.unit_of_measure || item?.unit_of_measure || "—"}</td>
+                        </tr>;
+                      })}</tbody>
+                    </table>
+                  </div>
+                  <button type="button" disabled={saving || hasDraft || !["Medical", "Supply"].includes(storeType)}
+                    onClick={() => prepareDepartmentIssue(request)}
+                    style={{ ...primaryButton, marginTop: 10, opacity: saving || hasDraft || !["Medical", "Supply"].includes(storeType) ? 0.6 : 1 }}>
+                    {hasDraft ? "Draft Issue Already Exists" : saving ? "Preparing..." : "Prepare Draft Issue"}
+                  </button>
+                </div>
+              );
+            })}
+            {!departmentRequests.some((request) =>
+              ["Approved", "Partially Approved"].includes(request.request_status) &&
+              departmentRequestItems.some((line) => Number(line.request_id) === Number(request.id) &&
+                Number(line.approved_quantity || 0) > Number(line.issued_quantity || 0))
+            ) && <p style={{ color: "#64748b" }}>No approved request quantities are waiting to be issued.</p>}
+
+            <h4>Issue History ({issueRecords.length})</h4>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1000 }}>
+                <thead><tr style={{ background: "#eff6ff", textAlign: "left" }}>
+                  {["Issue No.", "Request No.", "Department", "Date", "Items", "Status", "Action"].map((heading) => <th key={heading} style={{ padding: 9, borderBottom: "1px solid #cbd5e1" }}>{heading}</th>)}
+                </tr></thead>
+                <tbody>{issueRecords.map((issue) => {
+                  const request = departmentRequests.find((row) => Number(row.id) === Number(issue.request_id));
+                  const lines = issueRecordItems.filter((line) => Number(line.issue_id) === Number(issue.id));
+                  return <tr key={issue.id}>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{issue.issue_number}</td>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{request?.request_number || issue.request_id || "—"}</td>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{issue.issuing_department || "—"}</td>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{issue.issued_date ? new Date(issue.issued_date).toLocaleString() : "—"}</td>
+                    <td style={{ padding: 9, textAlign: "center", borderBottom: "1px solid #e2e8f0" }}>{lines.length}</td>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0", fontWeight: 700 }}>{issue.issue_status}</td>
+                    <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>
+                      {issue.issue_status === "Draft" ? (
+                        <button type="button" disabled={saving || !["Medical", "Supply"].includes(storeType)}
+                          onClick={() => confirmDepartmentIssue(issue)}
+                          style={{ ...primaryButton, background: "#b45309", opacity: saving || !["Medical", "Supply"].includes(storeType) ? 0.6 : 1 }}>
+                          {saving ? "Processing..." : "Confirm Issue & Deduct Stock"}
+                        </button>
+                      ) : "—"}
+                    </td>
+                  </tr>;
+                })}
+                {!issueRecords.length && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center", color: "#64748b" }}>No issue records found for this store.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {issueRecordItems.length > 0 && (
+              <div style={{ marginTop: 18, overflowX: "auto" }}>
+                <h4>Issue Item Details</h4>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 800 }}>
+                  <thead><tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                    {["Issue No.", "Item", "Batch", "Expiry", "Issued Quantity", "Unit"].map((heading) => <th key={heading} style={{ padding: 9, borderBottom: "1px solid #cbd5e1" }}>{heading}</th>)}
+                  </tr></thead>
+                  <tbody>{issueRecords.flatMap((issue) => issueRecordItems.filter((line) => Number(line.issue_id) === Number(issue.id)).map((line) => {
+                    const item = items.find((row) => Number(row.id) === Number(line.item_id));
+                    return <tr key={line.id}>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{issue.issue_number}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{item?.item_name || "Item #" + line.item_id}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.batch_number || "Allocated by FEFO/FIFO"}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.expiry_date || "—"}</td>
+                      <td style={{ padding: 9, textAlign: "right", borderBottom: "1px solid #e2e8f0" }}>{Number(line.issued_quantity || 0).toLocaleString()}</td>
+                      <td style={{ padding: 9, borderBottom: "1px solid #e2e8f0" }}>{line.unit_of_measure || item?.unit_of_measure || "—"}</td>
+                    </tr>;
+                  }))}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {section === "rrf" && (
           <div>
             <h4>{currentStore?.label} — Requisition and Report Form (RRF)</h4>
@@ -2241,7 +2471,7 @@ export default function PharmacyStoreManagement({ user }) {
           </div>
         )}
 
-        {!["entries", "entries-list", "requests", "bin-card", "stock-status", "inventory", "rrf", "waste-record", "waste-view"].includes(section) && (
+        {!["entries", "entries-list", "requests", "issued", "bin-card", "stock-status", "inventory", "rrf", "waste-record", "waste-view"].includes(section) && (
           <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 9, padding: 18, color: "#475569" }}>
             <strong>{currentStore?.label} — {currentSection?.label}</strong>
             <p style={{ marginBottom: 0 }}>This workflow is next in the implementation sequence. Entries and receipt records are now connected to the database.</p>
